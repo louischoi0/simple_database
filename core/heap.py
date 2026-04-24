@@ -4,8 +4,9 @@ from utils.buffer_cursor import buffer_cursor
 from utils.dec import *
 
 class heap_tuple:
-    def __init__(self, value):
+    def __init__(self, value, lsn=None, tid=None):
         self.value = value
+        self.lsn = lsn
     
     def size(self):
         return 8
