@@ -1,6 +1,8 @@
 from core.const import *
 from core.page import is_btree_page, page, ref_page
 from core.helper import _buffer, _ptype, _minkey, _id
+from core.page_mgr import global_palloc
+from core.blk import get_blk_diver
 from utils.buffer_cursor import buffer_cursor
 
 class bt_cursor:
@@ -65,23 +67,63 @@ class bt_node:
             if not vnode.is_overflow():
                 return vnode.direct_insert(inode)
             
-            if vnode.is_overflow() and vnode.level == 0:
-                pass
+            if vnode.level != 0:
+                target = vnode
+                continue
 
-            target = vnode
+            else:
+                new_root = split()
+                return new_root
+                
+            raise Exception("something went wrong")
+        
+        return root 
+
+    def split(self, new_node):
+        assert self.page.type == PAGE_TYPE_ROOT
+        index = self.find_internal_index_to_insert(_minkey(new_node))
+
+        nslots = self.slots.copy()
+        nslots.insert(kindex, _id(inode))
+        nkeys = []
+
+        for node_id in self.slots:
+            pg = ref_page(node_id)
+            k = _minkey(pg)
+            nkeys.append(k)
+
+        i = MAX_KEY_COUNT / 2
+
+        new_root_pg  = global_palloc()
+
+        self.keys = nkeys[:i]
+        self.slots = nslots[:i+1]
+        
+        new_root = bt_node(PAGE_TYPE_DATA, 0, new_root_pg)
+
+        new_root.keys = nkeys[i:]
+        new_root.slots = nslots[i+1:]
+        new_root.level = 0
+
+        return new_root
     
     def direct_insert(self, inode):
         assert len(self.slots) < MAX_SLOT_COUNT
+        assert len(self.slots) == len(self.keys) + 1
 
         kindex = self.find_internal_index_to_insert(_minkey(inode))
 
-        if kindex == 0:
-            self.keys.insert(0, _minkey(ref_page(self.slots[0])))
-        else:
-            self.keys.insert(kindex, _minkey(inode))
+        self.slots.insert(kindex, _id(inode))
+
+        nkeys = []
+
+        for node_id in self.slots:
+            pg = ref_page(node_id)
+            k = _minkey(pg)
+            nkeys.append(k)
+        self.keys = nkeys  
 
         print(f"direct insert: kindex={kindex}, keys={self.keys}")
-        self.slots.insert(kindex, _id(inode))
         self.key_count += 1
 
     def find_internal_node_to_insert(self, tuple_key):
@@ -92,14 +134,18 @@ class bt_node:
         if len(self.keys) == 0:
             return int( _minkey(ref_page(self.slots[0])) < tuple_key )
 
-        idx = 1
+        idx = 0
 
-        for k in self.keys:
+        for node_id in self.slots:
+            node_pg = ref_page(node_id)
+            k = _minkey(node_pg)
+            
             if tuple_key == k:
                 raise Exception(f"duplicated key error {k}")
 
             if tuple_key < k:
                 return idx
+            
             idx += 1
         
         return len(self.slots) - 1
