@@ -196,6 +196,20 @@ class kdapp:
         self.alloc = alloc   
         self.cache_pool = cache_pool
 
+PROCS = {}
+
+def fork_pg_mgr_proc(blk, allocator):
+    nonlocal PROCS
+    
+    pg_mgr_inst = pg_mgr(blk, allocator.cache_pool)
+    import threading
+    
+    th = threading.Thread(target=pg_mgr.proc)
+    th.start()
+
+    PROCS["pg_mgr"] = th
+    return th
+    
 if __name__ == "__main__":
     app = kdapp()
 
