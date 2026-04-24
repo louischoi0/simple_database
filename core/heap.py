@@ -47,6 +47,22 @@ class heap_page(page):
         for _ in range(self.tuple_count):
             value = read_cursor.read_int64()
             f(value)
+
+    def update_header_buffer(self):
+        header_buffer = self.ser_header()
+
+        assert len(header_buffer) == HDR_SIZE + 8
+
+        self.buffer[:len(header_buffer)] = header_buffer
+        self.mark_dirty_flag()
+
+    def ser_header(self):
+        return (
+            serint64(self.id) +
+            serint64(self.type) +
+            serint64(self.min_key) + 
+            serint64(self.tuple_count)
+        )
     
     @classmethod
     def parse_header_buffer(cls, buffer):

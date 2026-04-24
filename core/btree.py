@@ -141,7 +141,10 @@ class bt_node:
     def as_btnode(cls, page):
         assert is_btree_page(page)
 
-        btn = bt_node(page.type, 0,page)
+        if is_btree_page(page):
+            raise Exception("btree page can not be conveted to btree page")
+
+        btn = bt_node(_ptype(page), 0,page)
         btn.apply_header_buffer()
         return btn
 
@@ -171,7 +174,7 @@ class bt_node:
         return id, type, min_key, level, key_count, keys, slots
 
     def apply_header_buffer(self):
-        id, type, min_key, level, key_count, keys, slots = self.parse_header_buffer(self.page.buffer)
+        id, type, min_key, level, key_count, keys, slots = self.parse_header_buffer(_buffer(self.page))
 
         self.page.id = id
         self.page.type = type

@@ -23,8 +23,9 @@ class page_allocator:
     def hpalloc(self):
         new_page_id = self.metablock.inc() - 1
         print("heap page alloc: %d" % new_page_id)
+        pg = heap_page(new_page_id)
         self.cache_pool.cache(pg)
-        return heap_page(new_page_id)
+        return pg
 
 class page_cache_pool:
     def __init__(self, blkdev):
@@ -32,7 +33,7 @@ class page_cache_pool:
         self.pool = {}
     
     def cache(self, pg):
-        assert type(pg) == page
+        print(f"cache page {pg.id}")
         self.pool[pg.id] = pg
 
     def commit_all_pages(self):
@@ -46,6 +47,13 @@ class pg_mgr:
         self.cache_pool = cache_pool
     
     def proc(self):
+        while True:
+            self.commit_dirty_pages()
+
+            from time import sleep
+            sleep(1)
+
+    def commit_dirty_pages(self):
         for pgid in self.cache_pool.pool:
             pg = self.cache_pool.pool[pgid]
             pg.acquire_lock()

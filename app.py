@@ -29,18 +29,19 @@ def new_data_page_ini(allocator, min_key):
     new_page = allocator.palloc()
     new_page.type = PAGE_TYPE_DATA
     new_page.min_key = min_key
-    new_page.update_header_buffer()
 
     btn = bt_node(PAGE_TYPE_DATA, 0, new_page)
 
     nhpage = new_heap_page()
-    nhpage.update_header_buffer()
 
     nhpage.min_key = min_key
     nhpage.insert(heap_tuple(min_key))
 
     btn.slots = [nhpage.id]
     btn.keys = []
+
+    btn.update_header_buffer()
+    nhpage.update_header_buffer()
 
     app.blk.write_page(nhpage)
     app.blk.write_page(new_page)
@@ -119,8 +120,14 @@ def exec_command(cmd, app):
         h = new_heap_page()
         h.insert(heap_tuple(new_key))
 
-        blk.write_page(h)
         btn.insert(h)
+
+        btn.update_header_buffer()
+        h.update_header_buffer()
+
+        blk.write_page(h)
+        blk.write_page(btn)
+
     
     elif ctype == "read":
         page_id = int(cmd[1])
@@ -199,19 +206,25 @@ class kdapp:
 PROCS = {}
 
 def fork_pg_mgr_proc(blk, allocator):
-    nonlocal PROCS
-    
     pg_mgr_inst = pg_mgr(blk, allocator.cache_pool)
     import threading
     
-    th = threading.Thread(target=pg_mgr.proc)
-    th.start()
+    th = threading.Thread(target=pg_mgr_inst.proc)
 
     PROCS["pg_mgr"] = th
     return th
+
+def start_app_procs():
+    for th in PROCS:
+        th.start()
+
+def bootstrap_main():
+    app = kdapp()
+    fork_pg_mgr_proc(app.blk, app.alloc)
+    return app
     
 if __name__ == "__main__":
-    app = kdapp()
+    app = bootstrap_main()
 
     if sys.argv[1] == "test":
         exit(0)
