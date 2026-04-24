@@ -1,0 +1,7 @@
+from core.const import *
+
+def serint64(value: int) -> bytes:
+    return value.to_bytes(8, byteorder=BYTE_ORDER, signed=True)
+
+def toint64(buf: bytes) -> int:
+    return int.from_bytes(buf, byteorder=BYTE_ORDER, signed=True)
