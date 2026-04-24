@@ -11,17 +11,19 @@ class page_allocator:
     def __init__(self, blkdev):
         self.blkdev = blkdev
         self.metablock = blkdev.read_metablock()
-
+        self.cache_pool = page_cache_pool(blkdev)
+        
     def palloc(self):
         new_page_id = self.metablock.inc() - 1
         print("page alloc: %d" % new_page_id)
         pg = page(new_page_id, -1, -1)
-
+        self.cache_pool.cache(pg)
         return pg
 
     def hpalloc(self):
         new_page_id = self.metablock.inc() - 1
         print("heap page alloc: %d" % new_page_id)
+        self.cache_pool.cache(pg)
         return heap_page(new_page_id)
 
 class page_cache_pool:
