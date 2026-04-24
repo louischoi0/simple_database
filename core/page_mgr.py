@@ -7,6 +7,10 @@ global cache_pool
 alloc = None
 cache_pool = None
 
+def global_palloc():
+    global alloc
+    return alloc.palloc()
+
 class page_allocator:
     def __init__(self, blkdev):
         self.blkdev = blkdev
