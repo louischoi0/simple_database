@@ -11,7 +11,6 @@ class blk_driver:
     def __init__(self, dev_id):
         self.id = dev_id
         self.f = open(f"file__{dev_id}", "r+b")
-        self.cache = {}
        
     def write_page_buffer(self, id, buffer):
         self.f.seek(id * PAGE_SIZE + META_SIZE)
@@ -30,7 +29,7 @@ class blk_driver:
     
     def read_page_buffer(self, id):
         self.f.seek((id * PAGE_SIZE) + META_SIZE)
-        print(f"read page: from={id*PAGE_SIZE + META_SIZE}, len={PAGE_SIZE}")
+        print(f"read page {id}: from={id*PAGE_SIZE + META_SIZE}, len={PAGE_SIZE}")
         return bytearray(self.f.read(PAGE_SIZE))
     
     def read_page(self, id):

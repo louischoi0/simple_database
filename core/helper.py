@@ -3,6 +3,7 @@ from core.const import *
 def _minkey(page):
     if hasattr(page, "page"):
         return page.page.min_key
+
     return page.min_key
 
 def _id(page):

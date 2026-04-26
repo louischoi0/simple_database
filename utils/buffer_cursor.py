@@ -28,15 +28,16 @@ class buffer_cursor:
         print(*args)
     
     def advance(self, length):
-        if length <= 0:
-            raise Exception("advance length must be greather than zero")
+        if length < 0:
+            raise Exception("advance length must be greather than zero or equal to zero")
+        
+        if length == 0:
+            return
 
         self.check(length)
         buf = self.buffer[self.c:self.c + length]
         self.c += length
         self.log(f"cursor advance id={self.id} len={length}; now={self.c}")
-
-        return buf
 
     def read_int64(self):
         self.check(8)

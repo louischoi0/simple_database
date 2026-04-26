@@ -118,16 +118,15 @@ def exec_command(cmd, app):
         btn = bt_node.as_btnode(page)
 
         h = new_heap_page()
-        h.insert(heap_tuple(new_key))
+        h.initial_insert(heap_tuple(new_key))
+        h.update_header_buffer()
 
         btn.insert(h)
 
         btn.update_header_buffer()
-        h.update_header_buffer()
 
         blk.write_page(h)
         blk.write_page(btn)
-
     
     elif ctype == "read":
         page_id = int(cmd[1])

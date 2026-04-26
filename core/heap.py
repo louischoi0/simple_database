@@ -20,11 +20,16 @@ class heap_tuple:
 
 class heap_page(page):
     def __init__(self, page_id):
-        super().__init__(page_id, type, -1)
+        super().__init__(page_id, PAGE_TYPE_HEAP, -1)
         self.tuple_count = 0
-        self.type = PAGE_TYPE_HEAP
+    
+    def initial_insert(self, t):
+        self.insert(t)
+        self.min_key = t.value
     
     def insert(self, t):
+        assert t.value >= self.min_key
+
         self.buffer[HDR_SIZE:HDR_SIZE+8] = serint64(self.tuple_count)
         data_offset = HDR_SIZE + (self.tuple_count * 8) + 8
 

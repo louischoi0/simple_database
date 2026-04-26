@@ -11,6 +11,16 @@ def global_palloc():
     global alloc
     return alloc.palloc()
 
+def ref_page(id):
+    global cache_pool
+    
+    try:
+        return cache_pool.pool[id]
+    except KeyError:
+        page = cache_pool.blkdev.read_page(id)
+        cache_pool.cache(page)
+        return page
+
 class page_allocator:
     def __init__(self, blkdev):
         self.blkdev = blkdev
@@ -37,6 +47,8 @@ class page_cache_pool:
         self.pool = {}
     
     def cache(self, pg):
+        if pg is None:
+            raise Exception("try to cache Null page")
         print(f"cache page {pg.id}")
         self.pool[pg.id] = pg
 
@@ -67,6 +79,9 @@ class pg_mgr:
 
 def _init_mgr_module(blkdev):
     global alloc
+    global cache_pool
+
     alloc = page_allocator(blkdev)
-    cache_pool = page_cache_pool(blkdev)
+    cache_pool = alloc.cache_pool
+
     return alloc, cache_pool

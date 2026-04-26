@@ -1,4 +1,5 @@
 from core.const import *  
+from core.helper import _ptype
 from threading import Lock
 
 def serint64(value: int) -> bytes:
@@ -26,6 +27,9 @@ def cast_page(page):
     
     if is_heap_page(page):
         return page.as_heap()
+    
+    else:
+        raise Exception(f"unknown page type: {_ptype(page)}")
 
 def check_valid_header_size(page):
     assert len(_buffer(page)) == HDR_SIZE
@@ -42,18 +46,6 @@ def get_page_name(type):
     else:
         return "invalid page"
 
-def ref_page(id):
-    from core.blk import  get_blk_diver
-    blk = get_blk_diver()
-    try:
-        return blk.cache[id]
-    except KeyError:
-        page = blk.read_page(id)
-        blk.cache[id] = page
-        return page
-
-    return None
-
 class page:
     def __init__(self, page_id, type, min_key):
         self.id = page_id
@@ -68,6 +60,9 @@ class page:
 
     def release_lock(self):
         self.lock.release()
+    
+    def ptype(self):
+        return "page"
     
     def update_header_buffer(self):
         header_buffer = self.ser_header()
