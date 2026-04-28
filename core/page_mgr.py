@@ -11,6 +11,20 @@ def global_palloc():
     global alloc
     return alloc.palloc()
 
+def sys_hpalloc(sys_page_id):
+    global alloc
+    return alloc.sys_hpalloc(page_id)
+
+def ref_sys_page(id):
+    global cache_pool
+    
+    try:
+        return cache_pool.sys_pool[id]
+    except KeyError:
+        page = cache_pool.blkdev.read_page(id)
+        cache_pool.sys_cache(page)
+        return page
+
 def ref_page(id):
     global cache_pool
     
@@ -26,6 +40,14 @@ class page_allocator:
         self.blkdev = blkdev
         self.metablock = blkdev.read_metablock()
         self.cache_pool = page_cache_pool(blkdev)
+
+    def sys_hpalloc(self, page_id):
+        if self.cache_pool.sys_exists(page_id):
+            raise Exception(f"sys heap page:{page_id} already allocated")
+        
+        pg = heap_page(page_id)
+        self.cache_pool.sys_cache(pg)
+        return pg
         
     def palloc(self):
         new_page_id = self.metablock.inc() - 1
@@ -45,12 +67,25 @@ class page_cache_pool:
     def __init__(self, blkdev):
         self.blkdev = blkdev
         self.pool = {}
+        self.sys_pool = {} # sys pool page is never evicted
+    
+    def exists(self, id):
+        return id in self.pool
+    
+    def sys_exists(self, id):
+        return id in self.sys_pool
     
     def cache(self, pg):
         if pg is None:
             raise Exception("try to cache Null page")
         print(f"cache page {pg.id}")
         self.pool[pg.id] = pg
+    
+    def sys_cache(self, pg):
+        if pg is None:
+            raise Exception("try to cache Null sys page")
+        print(f"cache page {pg.id}")
+        self.sys_pool[pg.id] = pg
 
     def commit_all_pages(self):
         for id in self.pool:

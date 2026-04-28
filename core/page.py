@@ -53,8 +53,16 @@ class page:
         self.type = type
         self.buffer = bytearray(b'\x00' * int(PAGE_SIZE))
         self.dirty = False
+
         self.lock = Lock()
+        self.pin = 0
     
+    def inc_pin_count(self):
+        self.pin += 1
+    
+    def dec_pin_count(self):
+        self.pin -= 1
+
     def acquire_lock(self):
         self.lock.acquire()
 

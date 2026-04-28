@@ -7,7 +7,7 @@ class buffer_cursor:
         self.id = id
     
     def check(self, length):
-        if self.c + length >= len(self.buffer):
+        if self.c + length > len(self.buffer):
             raise Exception(f"buffer cursor exceeded: {self.c+length} of {len(self.buffer)}")
 
     def read_log(self, size, v):
@@ -47,17 +47,50 @@ class buffer_cursor:
         self.read_log(8, v)
         self.c += 8
         return v
+
+    def read_bytes(self):
+        length = self.read_int64()
+        self.check(length)
+        value = self.buffer[self.c:self.c + length]
+        self.c += length
+        return value
+    
+    def write_int64_a(self, v):
+        self.buffer[self.c:self.c + 8] = serint64(v)
+        self.write_log(8, v)
+        self.c += 8
     
     def write_int64(self, v):
         self.check(8)
-        self.buffer[self.c:self.c + 8] = serint64(v)
-        self.write_log(8, v)
+        return self.write_int64_a(v)
+    
+    def write_varchar(self, string):
+        data = string.encode("utf-8")
+        length = len(data)
+        self.write_int64(length)
+        self.check(length)
+        self.buffer[self.c:self.c+length] = data
+        self.c += length
+        return length
 
-        self.c += 8
-
-    def append_int64(self, value):
-        self.buffer += serint64(value)  
-        self.c += 8
+    def write_varchar_a(self, string):
+        data = string.encode("utf-8")
+        length = len(data)
+        self.write_int64_a(length)
+        self.buffer[self.c:self.c+length] = data
+        self.c += length
+        return length
+        
+    def write_bytes_a(self, bytes):
+        length = len(bytes)
+        self.write_int64_a(length)
+        self.buffer[self.c:self.c+length] = bytes
+    
+    def read_varchar(self):
+        length = self.read_int64()
+        buf = self.buffer[self.c:self.c+length]
+        self.c += length
+        return buf.decode("utf-8")
     
     def pad(self, size):
         self.check(size)

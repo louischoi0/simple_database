@@ -3,16 +3,27 @@ from core.page import page
 from utils.buffer_cursor import buffer_cursor
 from utils.dec import *
 
+class structured_tuple:
+    def __init__(self, schema, data):
+        None
+
 class heap_tuple:
-    def __init__(self, value, lsn=None, tid=None):
-        self.value = value
+    def __init__(self, tuple_id, data, lsn=None):
+        self.id = tuple_id
+        self.data = data
         self.lsn = lsn
     
     def size(self):
-        return 8
+        return 8 + 8 + len(self.data.encode("utf-8"))
     
     def ser(self):
-        return serint64(self.value)
+        cursor = buffer_cursor()
+
+        cursor.write_int64(self.size())
+        cursor.write_int64(self.id)
+        cursor.write_varchar(self.data)
+
+        return cursor.buffer
     
     @classmethod
     def parse(self, buffer):
@@ -25,10 +36,11 @@ class heap_page(page):
     
     def initial_insert(self, t):
         self.insert(t)
-        self.min_key = t.value
+        self.min_key = t.id
     
     def insert(self, t):
-        assert t.value >= self.min_key
+        assert t.id >= self.min_key
+        self.acquire_lock()
 
         self.buffer[HDR_SIZE:HDR_SIZE+8] = serint64(self.tuple_count)
         data_offset = HDR_SIZE + (self.tuple_count * 8) + 8
@@ -36,8 +48,10 @@ class heap_page(page):
         assert len(t.ser()) == 8
         self.buffer[data_offset:data_offset+t.size()] = t.ser()
 
-        assert t.value == heap_tuple.parse(t.ser())
+        #assert t.id == heap_tuple.parse(t.ser())
         self.tuple_count += 1
+
+        self.release_lock()
     
     def ptype(self):
         return "heap"

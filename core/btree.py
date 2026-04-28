@@ -13,6 +13,7 @@ class bt_cursor:
     
     def visit(self, node):
         self.ns.append(node)
+        self.count += 1
     
     def pop(self):
         dest = self.ns[-1]
@@ -33,7 +34,12 @@ class bt_node:
         self.keys = []
         self.slots = []
         self.level = level
+        self.next_page_id = 0
         self.page = page
+        self.page.type = type
+    
+    def set_next_page_id(self, next):
+        self.next_page_id = next
     
     def is_overflow(self):
         assert len(self.keys) <= MAX_KEY_COUNT
@@ -84,7 +90,10 @@ class bt_node:
         return None, cursor
 
     def insert(self, inode):
+        assert _ptype(self) == PAGE_TYPE_ROOT
+
         split_node, cursor = self.insert_phase_zero(inode)
+        node_type_before_split = None
         target = cursor.pop()
 
         if split_node is None:
@@ -92,9 +101,9 @@ class bt_node:
 
         while True:
             print(f"pop visit node for split recovery {_id(target)}")
-
             assert _ptype(target) != PAGE_TYPE_DATA
 
+            node_type_before_split = _ptype(target)
             split_node = target.insert_phase_one(split_node)
 
             if split_node is None:
@@ -107,60 +116,65 @@ class bt_node:
             else:
                 target = ntarget
 
-        assert _ptype(target) == PAGE_TYPE_ROOT
+        assert node_type_before_split == PAGE_TYPE_ROOT
         assert split_node is not None
 
-        target.set_page_type(PAGE_TYPE_INTERNAL)
-        new_root_right = target.split(split_node)
-
         new_root_pg = global_palloc()
-        new_root_btn = bt_node(PAGE_TYPE_ROOT, target.level + 1, new_right_pg)
+        new_root_btn = bt_node(PAGE_TYPE_ROOT, target.level + 1, new_root_pg)
 
-        new_root_btn.direct_insert(target)
-        new_root_btn.direct_insert(new_root_right)
+        new_root_btn.keys = [ _minkey(target) ]
+        new_root_btn.slots = [ _id(target), _id(split_node) ]
+        new_root_btn.page.min_key = _minkey(target)
+        new_root_btn.level = target.level + 1
+        new_root_btn.key_count = 1
 
         new_root_btn.update_header_buffer()
         target.update_header_buffer()
-        new_root_right.update_header_buffer()
 
         return new_root_btn
         
-        return self
-    
     def set_page_type(self, type):
         self.page.type = type
 
     def split(self, new_node):
-        print(f"split node {_id(self)}")
+
+        print(f"split node {_id(self)}:{_ptype(self)}")
+        if _ptype(self) == PAGE_TYPE_ROOT:
+            self.set_page_type(PAGE_TYPE_INTERNAL)
 
         index = self.find_leaf_index_to_insert(_minkey(new_node))
 
         nslots = self.slots.copy()
-        nslots.insert(index, _id(new_node))
-        nkeys = []
+        nslots.insert(index+1, _id(new_node))
 
-        for node_id in nslots[1:]:
-            pg = ref_page(node_id)
-            k = _minkey(pg)
-            nkeys.append(k)
-
-        i = int(MAX_KEY_COUNT / 2)
-
-        new_right_pg = global_palloc()
-        new_right_pg.type = _ptype(self)
+        nkeys = self.keys.copy()
+        i = int(len(nkeys) / 2)
 
         self.keys = nkeys[:i]
         self.slots = nslots[:i+1]
         self.key_count = len(self.keys)
+
+        new_right_pg = global_palloc()
+        new_right_pg.type = _ptype(self)
         
         new_right = bt_node(_ptype(self), self.level, new_right_pg)
+        print("here hre")
+        print(f"set new_right node {_id(new_right)}={_ptype(self)}")
         new_right.keys = nkeys[i:]
         new_right.slots = nslots[i+1:]
         new_right.key_count = len(new_right.keys)
         new_right.page.min_key = _minkey(ref_page(new_right.slots[0]))
+
         new_right.update_header_buffer()
+        self.update_header_buffer()
 
         return new_right
+    
+    def ref_slot(self, index):
+        pg = ref_page(self.slots[index])
+        print(f"ref_slot: index={index}; page_id={self.slots[index]}")
+
+        return bt_node.as_btnode(pg)
     
     def direct_insert(self, inode):
         assert len(self.slots) < MAX_SLOT_COUNT
@@ -169,37 +183,37 @@ class bt_node:
         if _ptype(inode) == PAGE_TYPE_HEAP:
             assert _ptype(self) == PAGE_TYPE_DATA
 
-        kindex = self.find_leaf_index_to_insert(_minkey(inode))
+        index = self.find_leaf_index_to_insert(_minkey(inode))
+        assert index > 0
 
-        self.slots.insert(kindex, _id(inode))
-        nkeys = []
+        self.slots.insert(index+1, _id(inode))
+        self.keys.insert(index, _minkey(inode))
 
-        for node_id in self.slots[1:]:
-            pg = ref_page(node_id)
-            k = _minkey(pg)
-            nkeys.append(k)
+        print(f"direct insert: kindex={index}, keys={self.keys}, slots={self.slots}")
 
-        self.keys = nkeys  
-
-        print(f"direct insert: kindex={kindex}, keys={self.keys}, slots={self.slots}")
         self.key_count += 1
+        assert len(self.keys) == self.key_count
+
+        if _ptype(inode) == PAGE_TYPE_DATA:
+            # prev node always exists
+            old_prev_btn = self.ref_slot(index-1)
+
+            if index != self.key_count:
+                inode.set_next_page_id(_id(self.ref_slot(index + 1)))
+            
+            else:
+                inode.set_next_page_id(old_prev_btn.next_page_id)
+
+            old_prev_btn.set_next_page_id(_id(inode))
+            old_prev_btn.update_header_buffer()
+            inode.update_header_buffer()
+
         self.update_header_buffer()
     
     def get_internal_node_to_go_down(self, tuple_key):
-        idx = 0
-
-        for node_id in self.slots:
-            node_pg = ref_page(node_id)
-            k = _minkey(node_pg)
-            
-            if tuple_key == k:
-                raise Exception(f"duplicated key error {k}")
-
+        for i, k in enumerate(self.keys):
             if tuple_key < k:
-                return self.slots[idx]
-            
-            idx += 1
-        
+                return self.slots[i]
         return self.slots[-1]
 
     def find_leaf_index_to_insert(self, tuple_key):
@@ -246,12 +260,13 @@ class bt_node:
         for k in self.keys:
             c.write_int64(k)
         
-        c.pad( (MAX_KEY_COUNT - len(self.keys)) * 8 )
+        c.pad( (MAX_KEY_COUNT - self.key_count) * 8 )
       
         for s in self.slots:
             c.write_int64(s)
 
-        c.pad( (MAX_KEY_COUNT + 1 - len(self.keys)) * 8 )
+        c.pad( (MAX_SLOT_COUNT - (self.key_count + 1)) * 8 )
+        c.write_int64(self.next_page_id)
         
         assert len(c.buffer) == len(self.page.buffer)
         self.page.buffer = c.buffer
@@ -290,10 +305,12 @@ class bt_node:
 
         cur.advance((MAX_SLOT_COUNT - (key_count + 1)) * 8)
 
-        return id, type, min_key, level, key_count, keys, slots
+        next_page_id = cur.read_int64()
+
+        return id, type, min_key, level, key_count, keys, slots, next_page_id
 
     def apply_header_buffer(self):
-        id, type, min_key, level, key_count, keys, slots = self.parse_header_buffer(_buffer(self.page))
+        id, type, min_key, level, key_count, keys, slots, next_page_id = self.parse_header_buffer(_buffer(self.page))
 
         self.page.id = id
         self.page.type = type
@@ -303,3 +320,4 @@ class bt_node:
         self.key_count = key_count
         self.keys = keys
         self.slots = slots
+        self.next_page_id = next_page_id

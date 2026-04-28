@@ -2,12 +2,16 @@ PAGE_SIZE = 1024 * 8
 BYTE_ORDER = "little"
 HDR_SIZE = 24
 MAX_PAGE_COUNT = 256
-META_SIZE = 256
+META_SIZE = 1024
 
 PAGE_TYPE_ROOT = 1
 PAGE_TYPE_INTERNAL = 2
 PAGE_TYPE_DATA = 3
 PAGE_TYPE_HEAP = 4
+
+# 0(첫번째) 페이지는 superblock을 관리하는 meta 페이지 이므로
+# meta system이외에는 접근이 불가능하기 때문에 논리적으로 NULLPAGE로 본다 
+NULL_PAGE = 0
 
 MAX_KEY_COUNT = 2
 MAX_SLOT_COUNT = MAX_KEY_COUNT + 1

@@ -75,19 +75,21 @@ def check_heap_page(hpage):
 def check_btree_page(bpage):
     bpage.update_header_buffer()
 
-    id, type, r_min_key, level, key_count, keys, slots = bt_node.parse_header_buffer(_buffer(bpage))
+    id, type, r_min_key, level, key_count, keys, slots, next_page_id = bt_node.parse_header_buffer(_buffer(bpage))
     assert bpage.page.type == type
 
     print("type: ", get_page_name(type))
     print("keys: ", bpage.keys)
     print("slots: ", bpage.slots)
     print("key_count: ", bpage.key_count)
+    print("next_page_id: ", bpage.next_page_id)
 
     assert id == bpage.page.id
     assert type == bpage.page.type
     assert r_min_key == bpage.page.min_key
     assert bpage.slots == slots
     assert bpage.key_count == key_count
+    assert bpage.next_page_id == next_page_id
 
 def exec_command(cmd, app):
     ctype = cmd[0]
