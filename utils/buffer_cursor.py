@@ -91,13 +91,32 @@ class buffer_cursor:
         buf = self.buffer[self.c:self.c+length]
         self.c += length
         return buf.decode("utf-8")
+
+    def read_char(self, length):
+        self.check(length)
+        buf = self.buffer[self.c:self.c+length]
+        self.c += length
+        return buf.decode("utf-8")
+
+    def write_char(self, value, length):
+        self.check(length)
+        self.buffer[self.c: self.c + length] = value.encode("utf-8")
+        self.c += length
+
+    def write_char_a(self, value, length):
+        self.buffer[self.c: self.c + length] = value.encode("utf-8")
+        self.c += length
     
     def pad(self, size):
         self.check(size)
+        return self.pad_a(size)
+
+    def pad_a(self, size):
         self.buffer[self.c:self.c+size] = b"\x00" * size   
         self.log(f"pad buffer id={self.id} pos={self.c}; len={size}")
         self.c += size
-      
+        return size      
+
     def append(self, buffer):
         self.buffer += buffer
         self.c = len(self.buffer)
