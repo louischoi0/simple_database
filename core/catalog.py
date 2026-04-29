@@ -3,8 +3,10 @@ from core.page_mgr import sys_hpalloc
 from core.const import *
 
 global SYS_OBJECTS
+
 SYS_OBJECTS = {}
 SYS_OBJECTS__NAME = {}
+SYS_TABLE_SCHEMA_CACHE = {}
 
 def register_sys_object(oid, object):
     SYS_OBJECTS[oid] = object
@@ -114,20 +116,19 @@ class Object:
             data = cursor.read_int64()
             return data, get_type("int"), False
 
-    def add_attr(self, obj):
-        # circular attach prohibited
-        assert self.type.oid != get_type("attribute").oid
-        self.attrs.append(obj)
-
 class SysObject(Object):
     def __init__(self, id, namespace, name, type, attrs=None, rel_id=0, value=None, value_type=None, value_is_null=True):
         attrs = attrs if attrs is not None else []
         super(SysObject, self).__init__(id, namespace, name, type, attrs, rel_id, value=value, value_is_null=value_is_null, value_type=value_type)
         register_sys_object(id, self)
 
-class Attribute(Object):
+class SysAttribute(Attribute):
     def __init__(self, oid, rel_id, name, value=None, value_type=None, value_is_null=True):
-        super(Attribute, self).__init__(oid, obj_sys_namespace, name, get_type("attribute"), rel_id=rel_id, value=value, value_is_null=value_is_null, value_type=value_type)
+        super(SysAttribute, self).__init__(oid, obj_sys_namespace, name, get_type("attribute"), rel_id=rel_id, value=value, value_is_null=value_is_null, value_type=value_type)
+
+class Attribute(Object):
+    def __init__(self, oid, namespace, rel_id, name, value=None, value_type=None, value_is_null=True):
+        super(Attribute, self).__init__(oid, namespace, name, get_type("attribute"), rel_id=rel_id, value=value, value_is_null=value_is_null, value_type=value_type)
 
     @classmethod
     def write_attr_buffer(cls, attrs, cursor):
@@ -176,8 +177,11 @@ type_int = SysObject(12, obj_sys_namespace, "typeInt", type_type)
 type_varchar = SysObject(13, obj_sys_namespace, "typeVarchar", type_type)
 type_char = SysObject(13, obj_sys_namespace, "typeVarchar", type_type)
 type_schema = SysObject(14, obj_sys_namespace, "typeSchema", type_type)
-type_namespace = SysObject(15, obj_sys_namespace, "typeNamespace", type_type)
-type_attrbute = SysObject(16, obj_sys_namespace, "typeAttribute", type_type)
+type_bool = SysObject(15, obj_sys_namespace, "typeBool", type_type)
+type_bytes = SysObject(16, obj_sys_namespace, "typeBytes", type_type)
+type_namespace = SysObject(17, obj_sys_namespace, "typeNamespace", type_type)
+type_attrbute = SysObject(18, obj_sys_namespace, "typeAttribute", type_type)
+type_column = SysObject(19, obj_sys_namespace, "typeColumn", type_type)
 
 TYPES = {
   "page": type_page,
@@ -185,20 +189,59 @@ TYPES = {
   "int": type_int,
   "varchar": type_varchar,
   "char": type_char,
+  "bool": type_bool,
   "attribute": type_attrbute,
+  "bytes": type_bytes,
+}
+
+TYPES_VALUE = {
+  "int": 0,
+  "varchar": 1,
+  "char": 2,
+  "bool": 3
 }
 
 def get_type(name): 
   return TYPES[name]
 
-obj_sys_types_table = SysObject(100, obj_sys_namespace, "types", get_type("table"))
-obj_sys_types_table.add_attr(Attribute(101, get_sys_object_id("types"), "table_desc_page", CATALOG_PAGE_ID__SYS_TABLE_TYPES_DESC))
+def get_type_value(name):
+    return TYPES_VALUE[name]
 
-obj_sys_types_table = SysObject(110, obj_sys_namespace, "tables", get_type("table"))
-obj_sys_types_table.add_attr(Attribute(111, get_sys_object_id("tables"), "table_desc_page", CATALOG_PAGE_ID__SYS_TABLE_TABLES_TABLE_DESC))
+def add_attr(ref_oid, attr):
+    pass
+
+obj_sys_types_table = SysObject(100, obj_sys_namespace, "types", get_type("table"))
+obj_sys_classes_table = SysObject(110, obj_sys_namespace, "classes", get_type("table"))
+obj_sys_columns_table = SysObject(110, obj_sys_namespace, "columns", get_type("table"))
+obj_sys_attributes_table = SysObject(110, obj_sys_namespace, "attributes", get_type("table"))
+obj_sys_proc_table = SysObject(110, obj_sys_namespace, "proc", get_type("table"))
+
+add_attr(get_sys_object_id("types"), SysAttribute(101, get_sys_object_id("types"), "table_desc_page", CATALOG_PAGE_ID__SYS_TABLE_TYPES_DESC))
+add_attr(get_sys_object_id("classes"), SysAttribute(111, get_sys_object_id("tables"), "table_desc_page", CATALOG_PAGE_ID__SYS_TABLE_TABLES_TABLE_DESC))
+
+
+class Column(Object):
+    def __init__(self, rel_id, pos, name, type_val, len, notnull=True, default=None):
+        self.rel_id = rel_id
+        self.pos = pos
+        self.name = name
+        self.type_val = type_val
+        self.len = len
+        self.notnull = notnull
+
+sys_columns_schema = [
+    Column(get_sys_object_id("columns"), 0, "rel_id", get_type_value("int"), notnull=True, default=None),
+    Column(get_sys_object_id("columns"), 1, "pos", get_type_value("int"), notnull=True, default=None),
+    Column(get_sys_object_id("columns"), 2, "name", get_type_value("varchar"), notnull=True, default=None),
+    Column(get_sys_object_id("columns"), 3, "type_val", get_type_value("int"), notnull=True, default=None),
+    Column(get_sys_object_id("columns"), 4, "len", get_type_value("int"), notnull=True, default=None),
+    Column(get_sys_object_id("columns"), 5, "notnull", get_type_value("bool"), notnull=True, default=True),
+    Column(get_sys_object_id("columns"), 5, "defval", get_type_value("bytes"), notnull=True, default=True),
+]
+
+
 
 # oid, name, fixed, version 
-
 def bootstrap_catalog_type_heap():
     system_catalog_type_page = sys_hpalloc(CATALOG_PAGE_ID__SYS_TYPES_TABLE_DESC)
     system_catalog_type_page.initial_insert()
