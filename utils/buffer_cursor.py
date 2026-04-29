@@ -101,3 +101,9 @@ class buffer_cursor:
     def append(self, buffer):
         self.buffer += buffer
         self.c = len(self.buffer)
+    
+    def end(self):
+        return self.c == len(self.buffer)
+    
+    def tail(self):
+        return self.buffer[self.c:]

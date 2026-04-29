@@ -1,5 +1,6 @@
 from utils.buffer_cursor import buffer_cursor
 from core.page_mgr import sys_hpalloc
+from core.const import *
 
 global SYS_OBJECTS
 SYS_OBJECTS = {}
@@ -64,14 +65,14 @@ class Object:
         Attribute.write_attr_buffer(self.attrs, cursor) 
 
         if self.value_is_null:
-            cursor.write_int64_a(0)
+            cursor.write_int64_a(PRIMITIVE_NULL_TYPE_FLAG)
             return cursor.buffer
 
         if type_equal(self.value_type, "varchar"):
-            cursor.write_int64_a(1)
+            cursor.write_int64_a(PRIMITIVE_VARCHAR_TYPE_FLAG)
             cursor.write_varchar_a(self.value)
         elif type_equal(self.value_type, "int"):
-            cursor.write_int64_a(2)
+            cursor.write_int64_a(PRIMITIVE_INT_TYPE_FLAG)
             cursor.write_int64_a(self.value)
 
         return cursor.buffer
@@ -102,14 +103,14 @@ class Object:
     def read_value(self, cursor):
         value_type_flag = cursor.read_int64()
 
-        if value_type_flag == 0:
+        if value_type_flag == PRIMITIVE_NULL_TYPE_FLAG:
             return None, None, True
         
-        elif value_type_flag == 1:
+        elif value_type_flag == PRIMITIVE_VARCHAR_TYPE_FLAG:
             data = cursor.read_varchar()
             return data, get_type("varchar"), False
         
-        elif value_type_flag == 2:
+        elif value_type_flag == PRIMITIVE_INT_TYPE_FLAG:
             data = cursor.read_int64()
             return data, get_type("int"), False
 
