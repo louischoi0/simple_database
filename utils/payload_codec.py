@@ -17,7 +17,7 @@ class payload_codec:
           cursor.write_varchar_a(value)
   
   @classmethod
-  def read_dynamic_type_value(self,cursor):
+  def read_dynamic_type_value(self, cursor):
       type_flag = cursor.read_int64()
 
       if type_flag == PRIMITIVE_NULL_TYPE_FLAG:

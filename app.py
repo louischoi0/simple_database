@@ -6,7 +6,7 @@ from core.page_mgr import page_allocator, _init_mgr_module, pg_mgr
 from core.page import get_page_name, is_btree_page, is_heap_page
 from core.const import *
 from core.btree import bt_node
-from core.heap import heap_page, heap_tuple
+from core.heap import heap_page, HeapTuple
 from core.helper import _buffer, _id, _ptype
 
 app = None
@@ -35,7 +35,7 @@ def new_data_page_ini(allocator, min_key):
     nhpage = new_heap_page()
 
     nhpage.min_key = min_key
-    nhpage.insert(heap_tuple(min_key))
+    nhpage.insert(HeapTuple(min_key))
 
     btn.slots = [nhpage.id]
     btn.keys = []
@@ -120,7 +120,7 @@ def exec_command(cmd, app):
         btn = bt_node.as_btnode(page)
 
         h = new_heap_page()
-        h.initial_insert(heap_tuple(new_key))
+        h.initial_insert(HeapTuple(new_key))
         h.update_header_buffer()
 
         btn.insert(h)
@@ -173,7 +173,7 @@ def exec_command(cmd, app):
         assert hpage.type == PAGE_TYPE_HEAP
         assert hpage.id == page_id
 
-        hpage.insert(heap_tuple(value))
+        hpage.insert(HeapTuple(value))
 
         blk.write_page(hpage)
         blk.commit_metablock(app.alloc.metablock)

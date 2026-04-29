@@ -19,3 +19,18 @@ def test_buffer_cursor_rwint64():
 
     assert cursor_r.read_varchar() == str0
     assert cursor_r.read_int64() == num0
+
+
+def test_buffer_cursor_bool():
+    cursor_w = buffer_cursor()
+    cursor_r = buffer_cursor()
+
+    cursor_w.write_bool_a(True)
+    cursor_w.write_bool_a(False)
+    cursor_w.write_bool_a(True)
+
+    cursor_r.buffer = cursor_w.buffer
+
+    assert cursor_r.read_bool()
+    assert not cursor_r.read_bool()
+    assert cursor_r.read_bool()

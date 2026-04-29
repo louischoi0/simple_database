@@ -6,7 +6,14 @@ global SYS_OBJECTS
 
 SYS_OBJECTS = {}
 SYS_OBJECTS__NAME = {}
-SYS_TABLE_SCHEMA_CACHE = {}
+
+TABLE_SCHEMA_CACHE = {}
+
+def cache_table_schema(oid, schema):
+    TABLE_SCHEMA_CACHE[oid] = schema
+
+def get_table_schema_from_cache(oid):
+    return TABLE_SCHEMA_CACHE[oid]
 
 def register_sys_object(oid, object):
     SYS_OBJECTS[oid] = object
@@ -69,13 +76,9 @@ class Object:
         if self.value_is_null:
             cursor.write_int64_a(PRIMITIVE_NULL_TYPE_FLAG)
             return cursor.buffer
-
-        if type_equal(self.value_type, "varchar"):
-            cursor.write_int64_a(PRIMITIVE_VARCHAR_TYPE_FLAG)
-            cursor.write_varchar_a(self.value)
-        elif type_equal(self.value_type, "int"):
-            cursor.write_int64_a(PRIMITIVE_INT_TYPE_FLAG)
-            cursor.write_int64_a(self.value)
+        
+        cursor.write_int64_a(PRIMITIVE_VARCHAR_TYPE_FLAG)
+        cursor.write_dynamic_type_a(self.value_type)
 
         return cursor.buffer
     
@@ -122,10 +125,6 @@ class SysObject(Object):
         super(SysObject, self).__init__(id, namespace, name, type, attrs, rel_id, value=value, value_is_null=value_is_null, value_type=value_type)
         register_sys_object(id, self)
 
-class SysAttribute(Attribute):
-    def __init__(self, oid, rel_id, name, value=None, value_type=None, value_is_null=True):
-        super(SysAttribute, self).__init__(oid, obj_sys_namespace, name, get_type("attribute"), rel_id=rel_id, value=value, value_is_null=value_is_null, value_type=value_type)
-
 class Attribute(Object):
     def __init__(self, oid, namespace, rel_id, name, value=None, value_type=None, value_is_null=True):
         super(Attribute, self).__init__(oid, namespace, name, get_type("attribute"), rel_id=rel_id, value=value, value_is_null=value_is_null, value_type=value_type)
@@ -147,15 +146,9 @@ class Attribute(Object):
             attrs.append(attr)
         return attrs
 
-class SysType:
-    def __init__(self, name, size):
-        self.name = name
-        self.size = size
-
-    @classmethod
-    def wrap(cls, obj):
-        assert obj.type == get_type("type")
-        return SysType(obj.name, obj.value)
+class SysAttribute(Attribute):
+    def __init__(self, oid, rel_id, name, value=None, value_type=None, value_is_null=True):
+        super(SysAttribute, self).__init__(oid, obj_sys_namespace, name, get_type("attribute"), rel_id=rel_id, value=value, value_is_null=value_is_null, value_type=value_type)
 
 # primatives
 obj_sys_namespace = SysObject(0, None, "namespaceSys", None)
@@ -171,41 +164,61 @@ type_type.type = type_type
 obj_sys_namespace.type = type_type
 
 # sys types
-type_page = SysObject(10, obj_sys_namespace, "typePage", type_type)
-type_table = SysObject(11, obj_sys_namespace, "typeTable", type_type)
-type_int = SysObject(12, obj_sys_namespace, "typeInt", type_type)
-type_varchar = SysObject(13, obj_sys_namespace, "typeVarchar", type_type)
-type_char = SysObject(13, obj_sys_namespace, "typeVarchar", type_type)
-type_schema = SysObject(14, obj_sys_namespace, "typeSchema", type_type)
-type_bool = SysObject(15, obj_sys_namespace, "typeBool", type_type)
-type_bytes = SysObject(16, obj_sys_namespace, "typeBytes", type_type)
-type_namespace = SysObject(17, obj_sys_namespace, "typeNamespace", type_type)
-type_attrbute = SysObject(18, obj_sys_namespace, "typeAttribute", type_type)
-type_column = SysObject(19, obj_sys_namespace, "typeColumn", type_type)
+type_page = SysObject(10, obj_sys_namespace, "type_page", type_type)
+type_table = SysObject(11, obj_sys_namespace, "type_table", type_type)
+
+type_int = SysObject(12, obj_sys_namespace, "int", type_type, value=0, value_is_null=False, value_type=0)
+type_int.value_type = type_int
+type_varchar = SysObject(13, obj_sys_namespace, "type_varchar", type_type, value=1, value_is_null=False, value_type=type_int)
+type_char = SysObject(13, obj_sys_namespace, "type_char", type_type, value=2, value_is_null=False, value_type=type_int)
+type_bool = SysObject(15, obj_sys_namespace, "type_bool", type_type, value=3, value_is_null=False, value_type=type_int)
+type_bytes = SysObject(16, obj_sys_namespace, "type_bytes", type_type, value=4, value_is_null=False, value_type=type_int)
+
+type_schema = SysObject(14, obj_sys_namespace, "type_schema", type_type)
+type_namespace = SysObject(17, obj_sys_namespace, "type_namespace", type_type)
+type_attrbute = SysObject(18, obj_sys_namespace, "type_attribute", type_type)
+type_column = SysObject(19, obj_sys_namespace, "type_column", type_type)
 
 TYPES = {
-  "page": type_page,
-  "table": type_table,
-  "int": type_int,
-  "varchar": type_varchar,
-  "char": type_char,
-  "bool": type_bool,
-  "attribute": type_attrbute,
-  "bytes": type_bytes,
+  "type_page": type_page,
+  "type_table": type_table,
+  "type_int": type_int,
+  "type_varchar": type_varchar,
+  "type_char": type_char,
+  "type_bool": type_bool,
+  "type_attribute": type_attrbute,
+  "type_bytes": type_bytes,
 }
 
-TYPES_VALUE = {
-  "int": 0,
-  "varchar": 1,
-  "char": 2,
-  "bool": 3
+TYPES_LEN = {
+  "type_int": 8,
+  "type_varchar": 0,
+  "type_char": 0,
+  "type_bool": 1,
+  "type_bytes": 0,
 }
+
+def get_type_by_val(type_val):
+    for t in TYPES:
+        if t.value == type_val:
+            return t
+
+    raise Exception(f"no type for value: {type_val}")
 
 def get_type(name): 
-  return TYPES[name]
+    if not name.startswith("type_"):
+        name = "type_" + name
+    return TYPES[name]
 
 def get_type_value(name):
-    return TYPES_VALUE[name]
+    if not name.startswith("type_"):
+        name = "type_" + name
+    return TYPES[name].value
+
+def get_type_len(name):
+    if not name.startswith("type_"):
+        name = "type_" + name
+    return TYPES_LEN[name]
 
 def add_attr(ref_oid, attr):
     pass
@@ -216,36 +229,41 @@ obj_sys_columns_table = SysObject(110, obj_sys_namespace, "columns", get_type("t
 obj_sys_attributes_table = SysObject(110, obj_sys_namespace, "attributes", get_type("table"))
 obj_sys_proc_table = SysObject(110, obj_sys_namespace, "proc", get_type("table"))
 
-add_attr(get_sys_object_id("types"), SysAttribute(101, get_sys_object_id("types"), "table_desc_page", CATALOG_PAGE_ID__SYS_TABLE_TYPES_DESC))
-add_attr(get_sys_object_id("classes"), SysAttribute(111, get_sys_object_id("tables"), "table_desc_page", CATALOG_PAGE_ID__SYS_TABLE_TABLES_TABLE_DESC))
-
+#add_attr(get_sys_object_id("types"), SysAttribute(101, get_sys_object_id("types"), "table_desc_page", CATALOG_PAGE_ID__SYS_TABLE_TYPES_DESC))
+#add_attr(get_sys_object_id("classes"), SysAttribute(111, get_sys_object_id("tables"), "table_desc_page", CATALOG_PAGE_ID__SYS_TABLE_TABLES_TABLE_DESC))
 
 class Column(Object):
-    def __init__(self, rel_id, pos, name, type_val, len, notnull=True, default=None):
+    def __init__(self, rel_id, pos, name, type, notnull=True, default_val=None):
         self.rel_id = rel_id
         self.pos = pos
         self.name = name
-        self.type_val = type_val
-        self.len = len
+        self.type = type
+        self.len = get_type_len(type.name)
         self.notnull = notnull
+        self.default_val = default_val
 
 sys_columns_schema = [
-    Column(get_sys_object_id("columns"), 0, "rel_id", get_type_value("int"), notnull=True, default=None),
-    Column(get_sys_object_id("columns"), 1, "pos", get_type_value("int"), notnull=True, default=None),
-    Column(get_sys_object_id("columns"), 2, "name", get_type_value("varchar"), notnull=True, default=None),
-    Column(get_sys_object_id("columns"), 3, "type_val", get_type_value("int"), notnull=True, default=None),
-    Column(get_sys_object_id("columns"), 4, "len", get_type_value("int"), notnull=True, default=None),
-    Column(get_sys_object_id("columns"), 5, "notnull", get_type_value("bool"), notnull=True, default=True),
-    Column(get_sys_object_id("columns"), 5, "defval", get_type_value("bytes"), notnull=True, default=True),
+    Column(get_sys_object_id("columns"), 0, "rel_id", get_type("int"), notnull=True, default_val=None),
+    Column(get_sys_object_id("columns"), 1, "pos", get_type("int"), notnull=True, default_val=None),
+    Column(get_sys_object_id("columns"), 2, "name", get_type("varchar"), notnull=True, default_val=None),
+    Column(get_sys_object_id("columns"), 3, "type_val", get_type("int"), notnull=True, default_val=None),
+    Column(get_sys_object_id("columns"), 4, "len", get_type("int"), notnull=True, default_val=None),
+    Column(get_sys_object_id("columns"), 5, "notnull", get_type("bool"), notnull=True, default_val=True),
+    Column(get_sys_object_id("columns"), 5, "defval", get_type("bytes"), notnull=True, default_val=True),
 ]
 
+cache_table_schema(get_sys_object_id("columns"), sys_columns_schema)
 
+sys_types_schema = [
+    Column(get_sys_object_id("types"), 0, "oid", get_type("int"), notnull=True, default_val=None),
+    Column(get_sys_object_id("types"), 1, "name", get_type("varchar"), notnull=True, default_val=None),
+    Column(get_sys_object_id("types"), 2, "type_val", get_type("int"), notnull=True, default_val=None),
+    Column(get_sys_object_id("types"), 3, "len", get_type("int"), notnull=True, default_val=None),
+]
+
+cache_table_schema(get_sys_object_id("types"), sys_types_schema)
 
 # oid, name, fixed, version 
 def bootstrap_catalog_type_heap():
-    system_catalog_type_page = sys_hpalloc(CATALOG_PAGE_ID__SYS_TYPES_TABLE_DESC)
+    system_catalog_type_page = sys_hpalloc(CATALOG_PAGE_ID__SYS_TABLE_TYPES_DESC)
     system_catalog_type_page.initial_insert()
-
-
-
-

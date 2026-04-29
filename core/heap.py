@@ -3,31 +3,87 @@ from core.page import page
 from utils.buffer_cursor import buffer_cursor
 from utils.dec import *
 
-class structured_tuple:
-    def __init__(self, schema, data):
-        None
+HEAP_TUPLE_HEADER_SIZE = 16
 
-class heap_tuple:
-    def __init__(self, tuple_id, data, lsn=None):
-        self.id = tuple_id
-        self.data = data
-        self.lsn = lsn
+class TupleVersion:
+    def __init__(self, xmin, xmax):
+        self.xmin = xmin
+        self.xmax = xmax
+
+class HeapTuple:
+    def __init__(self, buffer, version=None):
+        self.buffer: bytearray = buffer
+        self.version = version
     
     def size(self):
-        return 8 + 8 + len(self.data.encode("utf-8"))
+        # xmin, xmax
+        return  HEAP_TUPLE_HEADER_SIZE + len(self.buffer)
     
     def ser(self):
         cursor = buffer_cursor()
+        cursor.write_int64_a(self.size())
 
-        cursor.write_int64(self.size())
-        cursor.write_int64(self.id)
-        cursor.write_varchar(self.data)
+        if self.version is None:
+            cursor.pad_a(HEAP_TUPLE_HEADER_SIZE)
+        else:
+            cursor.write_int64_a(self.version.xmin)
+            cursor.write_int64_a(self.version.xmax)
 
+        cursor.write_varchar(self.buffer)
         return cursor.buffer
     
     @classmethod
     def parse(self, buffer):
         return toint64(buffer)
+    
+    @property
+    def key(self):
+        cursor = self.buffer(self.buffer)
+        cursor.advance(HEAP_TUPLE_HEADER_SIZE)
+
+        return cursor.read_int64()
+
+class StructuredTuple(HeapTuple):
+    def __init__(self, schema, buffer, version=None):
+        super(StructuredTuple, self).__init__(buffer, version)
+        self.schema = schema
+        self.structured_data = {}
+        self.struct()
+    
+    def get(self, key):
+        return self.structured_data[key]
+
+    def struct(self):
+        cursor = buffer_cursor(self.buffer)
+        cursor.advance(HEAP_TUPLE_HEADER_SIZE)
+
+        for idx, c in enumerate(self.schema):
+            assert c.pos == idx
+            value = cursor.read_dynamic_type_a(c.type.value)
+            self.structured_data[c.name] = value
+        return self.structured_data
+    
+    @classmethod
+    def parse(self, schema, buffer, version=None):
+        t = StructuredTuple(schema, buffer, version)
+        t.struct()
+        return t
+    
+    @classmethod
+    def load(self, schema, dictionary):
+        cursor = buffer_cursor()
+        cursor.pad_a(HEAP_TUPLE_HEADER_SIZE)
+
+        for idx, c in enumerate(schema):
+            assert c.pos == idx
+            value = dictionary[c.name]
+
+            cursor.write_dynamic_type_a(c.type.value, value)
+
+        t = StructuredTuple(schema, cursor.buffer)
+        t.structured_data = dictionary
+        return t
+
 
 class heap_page(page):
     def __init__(self, page_id):
@@ -36,10 +92,10 @@ class heap_page(page):
     
     def initial_insert(self, t):
         self.insert(t)
-        self.min_key = t.id
+        self.min_key = t.key
     
     def insert(self, t):
-        assert t.id >= self.min_key
+        assert t.key>= self.min_key
         self.acquire_lock()
 
         self.buffer[HDR_SIZE:HDR_SIZE+8] = serint64(self.tuple_count)
@@ -48,16 +104,14 @@ class heap_page(page):
         assert len(t.ser()) == 8
         self.buffer[data_offset:data_offset+t.size()] = t.ser()
 
-        #assert t.id == heap_tuple.parse(t.ser())
         self.tuple_count += 1
-
         self.release_lock()
     
     def ptype(self):
         return "heap"
     
     def iter(self, f):
-        read_cursor = buffer_cursor(self.buffer, self.id)
+        read_cursor = buffer_cursor(self.buffer, self.key)
         read_cursor.advance(HDR_SIZE)
         _tuple_count = read_cursor.read_int64()
 
@@ -77,7 +131,7 @@ class heap_page(page):
 
     def ser_header(self):
         return (
-            serint64(self.id) +
+            serint64(self.key) +
             serint64(self.type) +
             serint64(self.min_key) + 
             serint64(self.tuple_count)
@@ -93,11 +147,11 @@ class heap_page(page):
         )
 
     def apply_header_buffer(self):
-        id, type, min_key, tuple_count = self.parse_header_buffer(self.buffer)
-        c = buffer_cursor(self.buffer, id)
+        key, type, min_key, tuple_count = self.parse_header_buffer(self.buffer)
+        c = buffer_cursor(self.buffer, key)
         c.advance(HDR_SIZE)
 
-        self.id = id
+        self.key = key
         self.type = type
         self.min_key = min_key
         self.tuple_count = tuple_count

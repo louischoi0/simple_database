@@ -5,3 +5,9 @@ def serint64(value: int) -> bytes:
 
 def toint64(buf: bytes) -> int:
     return int.from_bytes(buf, byteorder=BYTE_ORDER, signed=True)
+
+def serbit(value: int) -> bytes:
+    return value.to_bytes(1, byteorder=BYTE_ORDER, signed=True)
+
+def tobit(buf: bytes) -> int:
+    return int.from_bytes(buf, byteorder=BYTE_ORDER, signed=True)

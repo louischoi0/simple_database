@@ -126,3 +126,58 @@ class buffer_cursor:
     
     def tail(self):
         return self.buffer[self.c:]
+
+    def write_bool_a(self, value):
+        value = int(value)
+        data = serbit(value)
+        self.buffer[self.c:self.c+1] = data
+        self.c += 1
+    
+    def write_bool(self, value):
+        value = int(value)
+        data = serbit(value)
+        self.check(1)
+        self.buffer[self.c:self.c+1] = data
+        self.c += 1
+    
+    def read_bool(self):
+        self.check(1)
+        v = self.buffer[self.c:self.c+1]
+        self.c += 1
+        return tobit(v)
+
+    def write_dynamic_type_a(self, type_val, value, size=None):
+        from core.catalog import get_type_value
+
+        if type_val == get_type_value("int"):
+            return self.write_int64_a(value)
+            
+        if type_val == get_type_value("bool"):
+            return self.write_bool_a(value)
+            
+        if type_val == get_type_value("varchar"):
+            return self.write_varchar_a(value)
+                
+        if type_val == get_type_value("char"):
+            assert size is not None
+            return self.write_char_a(value, size)
+
+        else :
+            raise Exception(f"invalid type value {type_val}")
+    
+    def read_dynamic_type_a(self, type_val, size=None):
+        from core.catalog import get_type_value
+        if type_val == get_type_value("int"):
+            return self.read_int64()
+            
+        if type_val == get_type_value("bool"):
+            return self.read_bool()
+            
+        if type_val == get_type_value("varchar"):
+            return self.read_varchar()
+                
+        if type_val == get_type_value("char"):
+            return self.read_char(size)
+
+        else :
+            raise Exception(f"invalid type value {type_val}")
