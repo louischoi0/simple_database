@@ -25,8 +25,6 @@ def test_structed_tuple2():
     st2.struct(test_table_schema)
     st.struct(test_table_schema)
 
-    print(st.size)
-
     assert st2.size == st.size
 
     for k in data_template:
@@ -57,8 +55,6 @@ def test_structured_tuple():
     datas = datas[1:]
     
     for a, b in zip(datas, read_datas):
-        print(a.get("student_id"))
-
         for k in data_template:
             assert a.get(k) == b[k]
         
@@ -77,7 +73,6 @@ def test_structured_tuple():
     print(heap.checksum())
 
 if __name__ == '__main__':
-    #import pytest
-    #pytest.main()
-    #test_structed_tuple2()
+    test_structed_tuple2()
     test_structured_tuple()
+
