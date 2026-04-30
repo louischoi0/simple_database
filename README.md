@@ -1,17 +1,18 @@
-# 파이톤으로 만드는 나만의 데이라베이스!
-
-## Database Internal 주요 개념
-아래 내용을 알고 있어야 나만의 데이터 베이스를 만들 수 있습니다. 
-
-1. Btree 자료구조
-2. Lock을 이용한 동시성 처리
-3. 원자성
+# Simple Database built with Python
+this project is PoC (proof of concept) for kernel integrated database system. the goal is to fully understand how each essential component of database is implemented, and works. 
 
 
-## 주요 코드 파일
+## Database Internal key concept
+1. Btree Data structure
+2. Lock and Race Condition 
+3. Atomicity
+4. Cacheing
+
+
+## Files
 
 ### page_mgr.py
-- 페이지 생성과 캐싱, 입출력
+- managing page and page cache pool, drop or create pages
 
 ### heap.py
 - Tuple(Record, Row) 를 저장하는 기본 페이지 단위 입니다.
