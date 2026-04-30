@@ -41,6 +41,12 @@ class buffer_cursor:
         buf = self.buffer[self.c:self.c + length]
         self.c += length
         self.log(f"cursor advance id={self.id} len={length}; now={self.c}")
+    
+    def read(self, size):
+        self.check(size)
+        buf = self.buffer[self.c: self.c+size]
+        self.c += size
+        return buf
 
     def read_int64(self):
         self.check(8)
@@ -86,6 +92,21 @@ class buffer_cursor:
         
     def write_bytes_a(self, bytes):
         length = len(bytes)
+        self.write_int64_a(length)
+        self.buffer[self.c:self.c+length] = bytes
+
+    def write_raw_a(self, bytes):
+        length = len(bytes)
+        self.buffer[self.c:self.c+length] = bytes
+
+    def write_raw(self, bytes):
+        length = len(bytes)
+        self.check(length)
+        self.buffer[self.c:self.c+length] = bytes
+
+    def write_bytes(self, bytes):
+        length = len(bytes)
+        self.check(8+length)
         self.write_int64_a(length)
         self.buffer[self.c:self.c+length] = bytes
     

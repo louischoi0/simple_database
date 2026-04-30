@@ -32,9 +32,6 @@ def cast_page(page):
     else:
         raise Exception(f"unknown page type: {_ptype(page)}")
 
-def check_valid_header_size(page):
-    assert len(_buffer(page)) == HDR_SIZE
-
 def get_page_name(type):
     if type == PAGE_TYPE_DATA:
         return "btree data"
@@ -57,6 +54,12 @@ class page:
 
         self.lock = Lock()
         self.pin = 0
+
+    def checksum(self):
+        import hashlib
+        enc = hashlib.md5()
+        enc.update(self.buffer)
+        return enc.hexdigest()
     
     def cursor(self):
         return buffer_cursor(self.buffer)

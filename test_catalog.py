@@ -1,6 +1,10 @@
-from core.catalog import Object, SysObject, get_sys_namespace, get_type, Attribute, get_sys_object_id
+from core.catalog import Object, SysObject, get_sys_namespace, get_type, Attribute, get_sys_object_id, bootstrap_catalog_sys_columns
 from core.catalog import sys_types_schema
 from core.heap import StructuredTuple, heap_page as HeapPage
+from core.blk import _init_blk_driver
+
+blk_driver = _init_blk_driver(1) 
+blk_driver.init_driver()
 
 def __test_object_dec():
     obj = SysObject(1, get_sys_namespace(), "testObject", get_type("varchar"), value="thisisvalue", value_is_null=False, value_type=get_type("varchar"))
@@ -43,9 +47,13 @@ def test_structured_tuple():
     assert len(structured_tuple.structured_data) == len(structured_tuple2.structured_data)
 
 
+def test_bootstrap_sys_columns():
+    bootstrap_catalog_sys_columns(sys_types_schema)
+    pass
 
 
 if __name__ == '__main__':
     #import pytest
     #pytest.main()
-    test_structured_tuple()
+    #test_structured_tuple()
+    test_bootstrap_sys_columns()

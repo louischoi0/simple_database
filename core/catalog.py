@@ -1,6 +1,7 @@
 from utils.buffer_cursor import buffer_cursor
 from core.page_mgr import sys_hpalloc
 from core.const import *
+from core.heap import StructuredTuple
 
 global SYS_OBJECTS
 
@@ -10,6 +11,7 @@ SYS_OBJECTS__NAME = {}
 TABLE_SCHEMA_CACHE = {}
 
 def cache_table_schema(oid, schema):
+    assert isinstance(schema, Schema)
     TABLE_SCHEMA_CACHE[oid] = schema
 
 def get_table_schema_from_cache(oid):
@@ -242,7 +244,30 @@ class Column(Object):
         self.notnull = notnull
         self.default_val = default_val
 
-sys_columns_schema = [
+class Schema:
+    def __init__(self, columns):
+        self.col_arr = columns
+        self.col_map = { x.name: x for x in columns }
+    
+    def get(self, name):
+        return self.col_map[name]
+    
+    def raw(self):
+        res = []
+        for col in self.col_arr:
+            d = {}
+            d["rel_id"] = col.rel_id
+            d["pos"] = col.pos
+            d["name"] = col.name
+            d["type"] = col.type
+            d["len"] = col.len
+            d["notnull"] = col.notnull
+            d["default_val"] = col.default_val
+
+            res.append(d)
+        return res
+
+sys_columns_schema = Schema([
     Column(get_sys_object_id("columns"), 0, "rel_id", get_type("int"), notnull=True, default_val=None),
     Column(get_sys_object_id("columns"), 1, "pos", get_type("int"), notnull=True, default_val=None),
     Column(get_sys_object_id("columns"), 2, "name", get_type("varchar"), notnull=True, default_val=None),
@@ -250,20 +275,27 @@ sys_columns_schema = [
     Column(get_sys_object_id("columns"), 4, "len", get_type("int"), notnull=True, default_val=None),
     Column(get_sys_object_id("columns"), 5, "notnull", get_type("bool"), notnull=True, default_val=True),
     Column(get_sys_object_id("columns"), 5, "defval", get_type("bytes"), notnull=True, default_val=True),
-]
+])
 
 cache_table_schema(get_sys_object_id("columns"), sys_columns_schema)
 
-sys_types_schema = [
+sys_types_schema = Schema([
     Column(get_sys_object_id("types"), 0, "oid", get_type("int"), notnull=True, default_val=None),
     Column(get_sys_object_id("types"), 1, "name", get_type("varchar"), notnull=True, default_val=None),
     Column(get_sys_object_id("types"), 2, "type_val", get_type("int"), notnull=True, default_val=None),
     Column(get_sys_object_id("types"), 3, "len", get_type("int"), notnull=True, default_val=None),
-]
+])
 
 cache_table_schema(get_sys_object_id("types"), sys_types_schema)
 
 # oid, name, fixed, version 
-def bootstrap_catalog_type_heap():
-    system_catalog_type_page = sys_hpalloc(CATALOG_PAGE_ID__SYS_TABLE_TYPES_DESC)
-    system_catalog_type_page.initial_insert()
+def bootstrap_catalog_sys_columns(blk, schema):
+    column_tuples = schema.raw()
+    hpage = sys_hpalloc(0)
+
+    for column_tuple in column_tuples:
+        tuple = StructuredTuple.load(sys_columns_schema, column_tuple)
+        hpage.insert(tuple)
+
+    hpage.update_header_buffer()
+    blk.write_page(hpage)
