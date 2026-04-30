@@ -1,5 +1,6 @@
 from core.const import *  
 from core.helper import _ptype
+from utils.buffer_cursor import buffer_cursor
 from threading import Lock
 
 def serint64(value: int) -> bytes:
@@ -57,10 +58,13 @@ class page:
         self.lock = Lock()
         self.pin = 0
     
-    def inc_pin_count(self):
+    def cursor(self):
+        return buffer_cursor(self.buffer)
+    
+    def pin(self):
         self.pin += 1
     
-    def dec_pin_count(self):
+    def unpin(self):
         self.pin -= 1
 
     def acquire_lock(self):
@@ -81,7 +85,7 @@ class page:
     def mark_dirty_flag(self):
         self.dirty = True 
     
-    def clear_dirty_flag():
+    def clear_dirty_flag(self):
         self.dirty = False
     
     def ser_header(self):

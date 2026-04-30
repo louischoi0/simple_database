@@ -27,6 +27,9 @@ class buffer_cursor:
             return
         print(*args)
     
+    def at(self, pos):
+        self.c = pos
+    
     def advance(self, length):
         if length < 0:
             raise Exception("advance length must be greather than zero or equal to zero")

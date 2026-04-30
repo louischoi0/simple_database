@@ -1,6 +1,6 @@
 from core.catalog import Object, SysObject, get_sys_namespace, get_type, Attribute, get_sys_object_id
 from core.catalog import sys_types_schema
-from core.heap import StructuredTuple
+from core.heap import StructuredTuple, heap_page as HeapPage
 
 def __test_object_dec():
     obj = SysObject(1, get_sys_namespace(), "testObject", get_type("varchar"), value="thisisvalue", value_is_null=False, value_type=get_type("varchar"))
@@ -41,6 +41,8 @@ def test_structured_tuple():
     assert structured_tuple.structured_data["type_val"] == structured_tuple2.structured_data["type_val"]
     assert structured_tuple.structured_data["len"] == structured_tuple2.structured_data["len"]
     assert len(structured_tuple.structured_data) == len(structured_tuple2.structured_data)
+
+
 
 
 if __name__ == '__main__':
