@@ -1,35 +1,48 @@
-# Simple Database built with Python
-this project is PoC (proof of concept) for kernel integrated database system. the goal is to fully understand how each essential component of database is implemented, and works. 
+# Simple Database — Built with Python
 
+> **PoC (Proof of Concept)** for a kernel-integrated database system.  
+> The goal is to deeply understand how each essential component of a database is implemented and operates — from raw disk I/O to B-tree indexing.
 
-## Database Internal key concept
-1. Btree Data structure
-2. Lock and Race Condition 
-3. Atomicity
-4. Cacheing
+## Architecture Overview
+```
+┌─────────────────────────────────────────┐
+│              catalog.py                 │  Schema, types, sys tables
+├─────────────────────────────────────────┤
+│               btree.py                  │  Index layer
+├─────────────────────────────────────────┤
+│               heap.py                   │  Tuple storage (unsorted)
+├──────────────────┬──────────────────────┤
+│    page_mgr.py   │      meta.py         │  Page cache / Metadata
+├──────────────────┴──────────────────────┤
+│               page.py                   │  Base page abstraction
+└─────────────────────────────────────────┘
+```
 
+## Key Concepts
 
-## Files
+| Concept | Description |
+|---|---|
+| **B-tree** | Index structure for range and random access |
+| **Locking & Race Conditions** | Concurrency control for safe multi-access |
+| **Atomicity** | Transaction guarantees — all-or-nothing writes |
+| **Caching** | Page cache pool to reduce disk I/O |
 
-### page_mgr.py
-- managing page and page cache pool, drop or create pages
+## Module Reference
 
-### heap.py
-- a page type for storing tuple
-- tuples contained in heap page is not sorted
-- it has slots to indicate each start position for each tuples
+### `page.py`
+Base class for all page types. Holds a buffer that is mapped directly to a disk segment. Subclassed by `heap`, `btree`, and `hash` page implementations.
 
-### page.py
-- basic unit for inserting data which has many types (heap, btree, hash)
-- super class has buffer mapped to disk segment 
+### `page_mgr.py`
+Manages the page cache pool. Responsible for allocating and dropping pages, and coordinating access between in-memory buffers and disk.
 
-### btree.py
-- data structure for index heap pages to help scan tuples by range or random access
+### `heap.py`
+A page type for storing tuples. Tuples are **unsorted** and accessed via a slot array that tracks the start offset of each tuple within the page.
 
-### meta.py
-- a component to deal with meta information such as total_page_count, last_committed_lsn ... etc
+### `btree.py`
+B-tree implementation used to index heap pages. Supports both range scans and random access lookups by key.
 
-### catalog.py
-- a section for definition: primitive types, sys tables, indexes, schema, columns
+### `meta.py`
+Handles database-level metadata including `total_page_count`, `last_committed_lsn`, and other system-wide state.
 
-
+### `catalog.py`
+Defines the database schema layer: primitive types, system tables, indexes, column definitions, and schema objects.
