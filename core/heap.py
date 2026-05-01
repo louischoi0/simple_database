@@ -13,7 +13,7 @@ class TupleVersion:
         self.xmax = xmax
 
 class HeapTuple:
-    HEAP_TUPLE_HEADER_SIZE = 24 # size xmin, xmax
+    HEAP_TUPLE_HEADER_SIZE = 32 # size xmin, xmax, reserved (null bit mask for structured heap tuple)
 
     def __init__(self, buffer: bytearray):
         self.buffer: bytearray = buffer
@@ -63,6 +63,23 @@ class StructuredTuple(HeapTuple):
 
         return self.structured_data
     
+    def get_null_flag_buffer(self):
+        cursor = buffer_cursor(self.buffer)
+        cursor.at(HeapTuple.HEAP_TUPLE_HEADER_SIZE - 8)
+
+        return cursor.read_int64()
+    
+    def get_null_flag(self, colnum):
+        value = self.get_null_flag_buffer()
+        return bool(value & (1 << colnum))
+    
+    def set_null_flag(self, colnum, flag):
+        value = self.get_null_flag_buffer()
+        value = (value & ~(1 << colnum)) | (int(flag) << colnum)
+
+        cursor.at(HeapTuple.HEAP_TUPLE_HEADER_SIZE - 8)
+        cursor.write_int64_a()
+
     @classmethod
     def parse(self, buffer):
         t = StructuredTuple(buffer)
@@ -76,7 +93,7 @@ class StructuredTuple(HeapTuple):
         return t
     
     @classmethod
-    def load(self, schema, dictionary, version=None):
+    def load(self, schema, dictionary, version=None) -> StructuredTuple: 
         cursor = buffer_cursor()
         cursor.pad_a(HeapTuple.HEAP_TUPLE_HEADER_SIZE)
 
@@ -152,6 +169,7 @@ class heap_page(page):
         # after read page buffer from disk
         # activate function fill all vars of instance
         # check deleted tuples and put it self.deleted
+        self.acquire_lock()
 
         self.apply_header_buffer()
         self.deleted = []
@@ -161,6 +179,8 @@ class heap_page(page):
             size = self.cursor.read_int64()
             if size == 0:
                 self.deleted.append(i)
+        
+        self.release_lock()
     
     def delete_tuple_by_index(self, index):
         pos = self.slots[index]
@@ -201,12 +221,16 @@ class heap_page(page):
         self.buffer[:len(header_buffer)] = header_buffer
         self.mark_dirty_flag()
     
+    def set_min_key_buffer(self, min_key):
+        self.cursor.at(heap_page.MIN_KEY_OFFSET)
+        self.cursor.write_int64(min_key)
+    
     def mark_min_key(self, min_key):
         # min_key wrote in page header is for convinience of executor 
         # it is not garuanted that min_key is actually min key in this page.
         # responsibility is up to caller.
-        self.cursor.at(heap_page.MIN_KEY_OFFSET)
-        self.cursor.write_int64(min_key)
+        self.min_key = min_key
+        self.set_min_key_buffer(min_key)
     
     def ser_header(self):
         cursor = buffer_cursor()

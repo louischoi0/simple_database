@@ -2,6 +2,9 @@ from utils.buffer_cursor import buffer_cursor
 from core.page_mgr import sys_hpalloc
 from core.const import *
 from core.heap import StructuredTuple
+from utils.logging import info
+
+_info = lambda x: info("catalog", x)
 
 global SYS_OBJECTS
 
@@ -41,6 +44,12 @@ def type_equal(type, type_name):
 
 def get_type_oid(type_name):
     return get_type(type_name).oid
+
+def get_type_name(type_name):
+    return get_type(type_name).name
+
+def get_type_val(type_name):
+    return get_type(type_name).value
 
 class Object:
     def __init__(self, oid, namespace, name, type, attrs=None, rel_id=None, value=None, value_type=None, value_is_null=True):
@@ -234,6 +243,19 @@ obj_sys_proc_table = SysObject(110, obj_sys_namespace, "proc", get_type("table")
 #add_attr(get_sys_object_id("types"), SysAttribute(101, get_sys_object_id("types"), "table_desc_page", CATALOG_PAGE_ID__SYS_TABLE_TYPES_DESC))
 #add_attr(get_sys_object_id("classes"), SysAttribute(111, get_sys_object_id("tables"), "table_desc_page", CATALOG_PAGE_ID__SYS_TABLE_TABLES_TABLE_DESC))
 
+CATALOG__SYS_TYPES_TABLE_DESC = 4
+CATALOG__SYS_COLUMNS_TABLE_DESC = 5
+CATALOG__SYS_TABLES_TABLE_DESC = 6
+
+SYS_TABLE_DESC_MAP = {
+    "types": CATALOG__SYS_TYPES_TABLE_DESC,
+    "columns": CATALOG__SYS_COLUMNS_TABLE_DESC,
+    "tables": CATALOG__SYS_TABLES_TABLE_DESC,
+}
+
+def get_sys_table_desc(name):
+    return SYS_TABLE_DESC_MAP
+
 class Column(Object):
     def __init__(self, rel_id, pos, name, type, notnull=True, default_val=None):
         self.rel_id = rel_id
@@ -248,6 +270,15 @@ class Schema:
     def __init__(self, columns):
         self.col_arr = columns
         self.col_map = { x.name: x for x in columns }
+    
+    def has_default_value(self, index):
+        return self.col_arr[index].default_val is not None
+    
+    def get_default_value(self, index):
+        return self.col_arr[index].default_val
+    
+    def is_notnull(self, index):
+        return self.col_arr[index].notnull
     
     def get(self, name):
         return self.col_map[name]
@@ -288,14 +319,51 @@ sys_types_schema = Schema([
 
 cache_table_schema(get_sys_object_id("types"), sys_types_schema)
 
-# oid, name, fixed, version 
-def bootstrap_catalog_sys_columns(blk, schema):
-    column_tuples = schema.raw()
-    hpage = sys_hpalloc(0)
+def bootstrap_catalog_sys_types(blk):
+    _info(f"sys_types bootstrapping ...")
+    hpage = sys_hpalloc(get_sys_table_desc("types"))
+
+    column_tuples = [
+        {
+            "oid": get_type_oid("int"),
+            "name": get_type_name("int"),
+            "type_val": get_type_val("int"),
+            "len": get_type_len("int"),
+        },
+        {
+            "oid": get_type_oid("varchar"),
+            "name": get_type_name("varchar"),
+            "type_val": get_type_val("varchar"),
+            "len": get_type_len("varchar"),
+        },
+        {
+            "oid": get_type_oid("char"),
+            "name": get_type_name("char"),
+            "type_val": get_type_val("char"),
+            "len": get_type_len("char"),
+        },
+        {
+            "oid": get_type_oid("bool"),
+            "name": get_type_name("bool"),
+            "type_val": get_type_val("bool"),
+            "len": get_type_len("bool"),
+        }
+    ]
 
     for column_tuple in column_tuples:
-        tuple = StructuredTuple.load(sys_columns_schema, column_tuple)
+        tuple = StructuredTuple.load(sys_types_schema, column_tuple)
         hpage.insert(tuple)
 
     hpage.update_header_buffer()
     blk.write_page(hpage)
+    _info(f"sys_types table initialized: {hpage.checksum()}")
+
+
+def read_sys_types_tuples(blk):
+    page = blk.read_page(get_sys_table_desc("types"))
+    heap_page = page.as_heap()
+    heap_page.activate()
+
+
+
+

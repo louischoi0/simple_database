@@ -9,8 +9,8 @@ PAGE_TYPE_INTERNAL = 2
 PAGE_TYPE_DATA = 3
 PAGE_TYPE_HEAP = 4
 
-# 0(첫번째) 페이지는 superblock을 관리하는 meta 페이지 이므로
-# meta system이외에는 접근이 불가능하기 때문에 논리적으로 NULLPAGE로 본다 
+# actual zero page is system page for meta information of db, 
+# so it is okay to treat zero num as null page id in case that sub component deal with except meta system
 NULL_PAGE = 0
 
 MAX_KEY_COUNT = 2
@@ -18,8 +18,6 @@ MAX_SLOT_COUNT = MAX_KEY_COUNT + 1
 BTREE_DETAIL_HDR_SIZE = 8 + 8 + (8*(MAX_SLOT_COUNT-1)) + (8 * MAX_SLOT_COUNT)
 
 BUFFER_CURSOR_DEBUG = False
-
-
 
 PRIMITIVE_NULL_TYPE_FLAG = 0
 PRIMITIVE_INT_TYPE_FLAG = 1

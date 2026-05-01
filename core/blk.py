@@ -2,10 +2,12 @@ from core.const import *
 from core.meta import metablock
 from core.page import cast_page, page
 from core.helper import _id, _buffer
+from utils.logging import info
 from utils.dec import toint64, serint64
 
 global blk
 blk = None
+_info = lambda x: info("blk", x)
 
 class blk_driver:
     def __init__(self, dev_id):
@@ -25,11 +27,11 @@ class blk_driver:
         self.f.seek(offset)
         self.f.write(_buffer(page))
 
-        print(f"writepage: id={_id(page)}, type={page.ptype()} from={offset}, len={blen}")
+        _info(f"writepage: id={_id(page)}, type={page.ptype()} from={offset}, len={blen}")
     
     def read_page_buffer(self, id):
         self.f.seek((id * PAGE_SIZE) + META_SIZE)
-        print(f"read page {id}: from={id*PAGE_SIZE + META_SIZE}, len={PAGE_SIZE}")
+        _info(f"read page {id}: from={id*PAGE_SIZE + META_SIZE}, len={PAGE_SIZE}")
         return bytearray(self.f.read(PAGE_SIZE))
     
     def read_page(self, id):
@@ -50,7 +52,7 @@ class blk_driver:
 
     def commit_metablock(self, metablock):
         self.f.seek(0)
-        print("commit: ", metablock.max_page)
+        _info(f"commit: {metablock.max_page}")
         self.f.write(serint64(metablock.max_page))          
 
 def _init_blk_driver(dev_id):

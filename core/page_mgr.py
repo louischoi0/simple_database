@@ -1,8 +1,11 @@
 from core.page import page
 from core.heap import heap_page
+from utils.logging import info
+from core.helper import _minkey
 
 global alloc
 global cache_pool
+_info = lambda x: info("page_mgr", x)
 
 alloc = None
 cache_pool = None
@@ -13,7 +16,7 @@ def global_palloc():
 
 def sys_hpalloc(sys_page_id):
     global alloc
-    return alloc.sys_hpalloc(page_id)
+    return alloc.sys_hpalloc(sys_page_id)
 
 def ref_sys_page(id):
     global cache_pool
@@ -35,6 +38,10 @@ def ref_page(id):
         cache_pool.cache(page)
         return page
 
+def ref_minkey(id):
+    pg = ref_page(id)
+    return _minkey(pg)
+
 class page_allocator:
     def __init__(self, blkdev):
         self.blkdev = blkdev
@@ -51,14 +58,14 @@ class page_allocator:
         
     def palloc(self):
         new_page_id = self.metablock.inc() - 1
-        print("page alloc: %d" % new_page_id)
+        _info("page alloc: %d" % new_page_id)
         pg = page(new_page_id, -1, -1)
         self.cache_pool.cache(pg)
         return pg
 
     def hpalloc(self):
         new_page_id = self.metablock.inc() - 1
-        print("heap page alloc: %d" % new_page_id)
+        _info("heap page alloc: %d" % new_page_id)
         pg = heap_page(new_page_id)
         self.cache_pool.cache(pg)
         return pg
@@ -78,13 +85,13 @@ class page_cache_pool:
     def cache(self, pg):
         if pg is None:
             raise Exception("try to cache Null page")
-        print(f"cache page {pg.id}")
+        _info(f"cache page {pg.id}")
         self.pool[pg.id] = pg
     
     def sys_cache(self, pg):
         if pg is None:
             raise Exception("try to cache Null sys page")
-        print(f"cache page {pg.id}")
+        _info(f"cache page {pg.id}")
         self.sys_pool[pg.id] = pg
 
     def commit_all_pages(self):

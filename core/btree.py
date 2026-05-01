@@ -1,10 +1,13 @@
 from core.const import *
 from core.page import is_btree_page, page
-from core.page_mgr import ref_page
+from core.page_mgr import ref_page, ref_minkey
 from core.helper import _buffer, _ptype, _minkey, _id
 from core.page_mgr import global_palloc
 from core.blk import get_blk_diver
 from utils.buffer_cursor import buffer_cursor
+from utils.logging import info
+
+_info = lambda x: info("btree", x)
 
 class bt_cursor:
     def __init__(self):
@@ -51,13 +54,14 @@ class bt_node:
     
     def insert_phase_one(self, inode):
         split_node = None
+        insert_index = -1
 
         if not self.is_overflow():
-            self.direct_insert(inode)
+            insert_index = self.direct_insert(inode)
         else:
             split_node = self.split(inode)
 
-        return split_node
+        return split_node, insert_index
 
     def insert_phase_zero(self, inode):
         target = self 
@@ -74,39 +78,52 @@ class bt_node:
             vnode = bt_node.as_btnode(vnode)
 
             if _ptype(vnode) != PAGE_TYPE_DATA:
-                print(f"visit node for insert {_id(vnode)}")
+                _info(f"visit node for insert {_id(vnode)}")
                 cursor.visit(vnode)
                 target = vnode
                 continue
 
             if not vnode.is_overflow():
-                print(f"direct insert new heap page to {_id(vnode)}")
-                vnode.direct_insert(inode)
-                return None, cursor
+                _info(f"direct insert new heap page{_id(inode)} to {_id(vnode)}")
+                index = vnode.direct_insert(inode)
+                return None, cursor, index
             
             else:
-                return vnode.split(inode), cursor
+                return vnode.split(inode), cursor, -1
 
-        return None, cursor
+        return None, cursor, -1
+    
+
+    def update_min_key_upper_nodes(self, min_key, cursor):
+        node = cursor.pop_try()
+        while node is not None:
+            node.set_min_key(min_key)
+            node = cursor.pop_try()
 
     def insert(self, inode):
         assert _ptype(self) == PAGE_TYPE_ROOT
 
-        split_node, cursor = self.insert_phase_zero(inode)
+        split_node, cursor, insert_index = self.insert_phase_zero(inode)
+        insert_min_key = _minkey(inode)
         node_type_before_split = None
-        target = cursor.pop()
 
         if split_node is None:
+            if insert_index == 0:
+                self.update_min_key_upper_nodes(insert_min_key, cursor)
             return self
 
+        target = cursor.pop()
+
         while True:
-            print(f"pop visit node for split recovery {_id(target)}")
+            _info(f"pop visit node for split recovery {_id(target)}")
             assert _ptype(target) != PAGE_TYPE_DATA
 
             node_type_before_split = _ptype(target)
-            split_node = target.insert_phase_one(split_node)
+            split_node, insert_index = target.insert_phase_one(split_node)
 
             if split_node is None:
+                if insert_index == 0:
+                    self.update_min_key_upper_nodes(insert_min_key)
                 return self
 
             ntarget = cursor.pop_try()
@@ -122,7 +139,7 @@ class bt_node:
         new_root_pg = global_palloc()
         new_root_btn = bt_node(PAGE_TYPE_ROOT, target.level + 1, new_root_pg)
 
-        new_root_btn.keys = [ _minkey(target) ]
+        new_root_btn.keys = [ _minkey(split_node) ]
         new_root_btn.slots = [ _id(target), _id(split_node) ]
         new_root_btn.page.min_key = _minkey(target)
         new_root_btn.level = target.level + 1
@@ -137,31 +154,38 @@ class bt_node:
         self.page.type = type
 
     def split(self, new_node):
+        _info(f"split node {_id(self)}:{_ptype(self)}")
 
-        print(f"split node {_id(self)}:{_ptype(self)}")
         if _ptype(self) == PAGE_TYPE_ROOT:
             self.set_page_type(PAGE_TYPE_INTERNAL)
 
         index = self.find_leaf_index_to_insert(_minkey(new_node))
 
         nslots = self.slots.copy()
-        nslots.insert(index+1, _id(new_node))
-
+        nslots.insert(index, _id(new_node))
         nkeys = self.keys.copy()
+
+        if index > 0:
+            nkeys.insert(index-1, _minkey(new_node))
+        else:
+            nkeys.insert(0, ref_minkey(nslots[0]))
+
         i = int(len(nkeys) / 2)
 
         self.keys = nkeys[:i]
         self.slots = nslots[:i+1]
         self.key_count = len(self.keys)
+        self.set_min_key(ref_minkey(self.slots[0]))
 
         new_right_pg = global_palloc()
         new_right_pg.type = _ptype(self)
         
         new_right = bt_node(_ptype(self), self.level, new_right_pg)
-        print("here hre")
-        print(f"set new_right node {_id(new_right)}={_ptype(self)}")
-        new_right.keys = nkeys[i:]
+        _info(f"set new_right node {_id(new_right)}={_ptype(self)}")
+
+        new_right.keys = nkeys[i+1:]
         new_right.slots = nslots[i+1:]
+
         new_right.key_count = len(new_right.keys)
         new_right.page.min_key = _minkey(ref_page(new_right.slots[0]))
 
@@ -172,9 +196,11 @@ class bt_node:
     
     def ref_slot(self, index):
         pg = ref_page(self.slots[index])
-        print(f"ref_slot: index={index}; page_id={self.slots[index]}")
-
+        _info(f"ref_slot: index={index}; page_id={self.slots[index]}")
         return bt_node.as_btnode(pg)
+    
+    def set_min_key(self, min_key):
+        self.page.min_key = min_key
     
     def direct_insert(self, inode):
         assert len(self.slots) < MAX_SLOT_COUNT
@@ -184,12 +210,20 @@ class bt_node:
             assert _ptype(self) == PAGE_TYPE_DATA
 
         index = self.find_leaf_index_to_insert(_minkey(inode))
-        assert index > 0
 
-        self.slots.insert(index+1, _id(inode))
-        self.keys.insert(index, _minkey(inode))
+        if _minkey(inode) < self.page.min_key:
+            assert index == 0
 
-        print(f"direct insert: kindex={index}, keys={self.keys}, slots={self.slots}")
+        if index > 0:
+            self.slots.insert(index, _id(inode))
+            self.keys.insert(index-1, _minkey(inode))
+        else:
+            first_slot = self.slots[0]
+            self.keys.insert(0, ref_minkey(first_slot))
+            self.slots.insert(0, _id(inode))
+            self.set_min_key(_minkey(inode))
+
+        _info(f"direct insert: kindex={index}, keys={self.keys}, slots={self.slots}")
 
         self.key_count += 1
         assert len(self.keys) == self.key_count
@@ -209,6 +243,7 @@ class bt_node:
             inode.update_header_buffer()
 
         self.update_header_buffer()
+        return index
     
     def get_internal_node_to_go_down(self, tuple_key):
         for i, k in enumerate(self.keys):
@@ -219,9 +254,7 @@ class bt_node:
     def find_leaf_index_to_insert(self, tuple_key):
         idx = 0
 
-        print(f"direct insert: {tuple_key} to {_id(self)},")
-        print(self.keys)
-        print(self.slots)
+        _info(f"direct insert: {tuple_key} to {_id(self)},")
 
         for node_id in self.slots:
             node_pg = ref_page(node_id)
@@ -314,7 +347,7 @@ class bt_node:
 
         self.page.id = id
         self.page.type = type
-        self.page.min_key = min_key
+        self.set_min_key(min_key)
 
         self.level = level
         self.key_count = key_count
