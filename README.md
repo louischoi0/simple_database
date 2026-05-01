@@ -1,34 +1,48 @@
-# Simple Database built with Python
-this project is PoC (proof of concept) for kernel integrated database system. the goal is to fully understand how each essential component of database is implemented, and works. 
+# Simple Database — Built with Python
 
+> **PoC (Proof of Concept)** for a kernel-integrated database system.  
+> The goal is to deeply understand how each essential component of a database is implemented and operates — from raw disk I/O to B-tree indexing.
 
-## Database Internal key concept
-1. Btree Data structure
-2. Lock and Race Condition 
-3. Atomicity
-4. Cacheing
+## Architecture Overview
+```
+┌─────────────────────────────────────────┐
+│              catalog.py                 │  Schema, types, sys tables
+├─────────────────────────────────────────┤
+│               btree.py                  │  Index layer
+├─────────────────────────────────────────┤
+│               heap.py                   │  Tuple storage (unsorted)
+├──────────────────┬──────────────────────┤
+│    page_mgr.py   │      meta.py         │  Page cache / Metadata
+├──────────────────┴──────────────────────┤
+│               page.py                   │  Base page abstraction
+└─────────────────────────────────────────┘
+```
 
+## Key Concepts
 
-## Files
+| Concept | Description |
+|---|---|
+| **B-tree** | Index structure for range and random access |
+| **Locking & Race Conditions** | Concurrency control for safe multi-access |
+| **Atomicity** | Transaction guarantees — all-or-nothing writes |
+| **Caching** | Page cache pool to reduce disk I/O |
 
-### page_mgr.py
-- managing page and page cache pool, drop or create pages
+## Module Reference
 
-### heap.py
-- Tuple(Record, Row) 를 저장하는 기본 페이지 단위 입니다.
-- min_key를 이용해 heap에 포함된 최소값을 저장하여 인덱싱을 용이하게 합니다.
-- heap 페이지 내부는 정렬 되어 있지 않으며 특정 키를 검색하기 위해서는 heap 페이지를 scan합니다. 
+### `page.py`
+Base class for all page types. Holds a buffer that is mapped directly to a disk segment. Subclassed by `heap`, `btree`, and `hash` page implementations.
 
+### `page_mgr.py`
+Manages the page cache pool. Responsible for allocating and dropping pages, and coordinating access between in-memory buffers and disk.
 
-### page.py
-- 데이터를 저장하는 가장 기본적인 단위로써 페이지가 정의되어 있습니다.
-- 동시성을 관리하기 위한 Lock, Pin 등의 기능을 포함하고 있습니다.
+### `heap.py`
+A page type for storing tuples. Tuples are **unsorted** and accessed via a slot array that tracks the start offset of each tuple within the page.
 
-### btree.py
-- 힙페이지를 인덱싱하는 자료구조 페이지 입니다.
+### `btree.py`
+B-tree implementation used to index heap pages. Supports both range scans and random access lookups by key.
 
-### meta.py
-- 현재까지 생성된 페이지 수와 같은 전체적인 데이터베이스 시스템의 상태값을 관리하는 컴포넌트 입니다.
+### `meta.py`
+Handles database-level metadata including `total_page_count`, `last_committed_lsn`, and other system-wide state.
 
-### catalog.py
-- 데이터베이스의 원시 타입, 테이블 정보, 인덱스 정보들을 관리하기 위한 시스템 변수들의 선언을 포함합니다.
+### `catalog.py`
+Defines the database schema layer: primitive types, system tables, indexes, column definitions, and schema objects.
