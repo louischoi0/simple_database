@@ -1,5 +1,6 @@
-from core.catalog import Object, SysObject, get_sys_namespace, get_type, Attribute, get_sys_object_id
+from core.catalog import Object, SysObject, get_sys_namespace, get_type, Attribute, get_sys_object_id, sys_columns_schema
 from core.catalog import bootstrap_catalog_sys_types, read_sys_types_tuples, bootstrap_catalog_sys_columns, read_sys_table, read_sys_columns_tuples
+from core.catalog import bootstrap_catalog_sys_objects
 from core.catalog import sys_types_schema
 from core.heap import StructuredTuple, heap_page as HeapPage
 from core.blk import _init_blk_driver
@@ -28,6 +29,19 @@ def __test_attr_dec():
 
     attr2.display()
 
+def test_parse_catalog_column_schema():
+    tuple0 = {
+            "rel_id": get_sys_object_id("columns"),
+            "pos":  sys_columns_schema.get_attribute("rel_id", "pos"),
+            "name":  sys_columns_schema.get_attribute("rel_id", "name"),
+            "type_val":  sys_columns_schema.get_attribute("rel_id", "type_val"),
+            "len":  sys_columns_schema.get_attribute("rel_id", "len"),
+            "notnull":  sys_columns_schema.get_attribute("rel_id", "notnull"),
+            "defval":  sys_columns_schema.get_attribute("rel_id", "defval"),
+    }
+
+
+    StructuredTuple.load()
 
 def test_structured_tuple():
     data = {
@@ -46,14 +60,23 @@ def test_structured_tuple():
     assert structured_tuple.structured_data["len"] == structured_tuple2.structured_data["len"]
     assert len(structured_tuple.structured_data) == len(structured_tuple2.structured_data)
 
-
 if __name__ == '__main__':
     app = DBMaster(2)
     app.activate()
 
+    bootstrap_catalog_sys_objects(app.blk)
+    tuples = read_sys_table(app.blk, "objects")
+    for t in tuples:
+        print(t)
+    exit(0)
+
     bootstrap_catalog_sys_types(app.blk)
     tuples = read_sys_table(app.blk, "types")
 
-    bootstrap_catalog_sys_columns(app.blk)
+    bootstrap_catalog_sys_columns(app.blk, "columns")
+    bootstrap_catalog_sys_columns(app.blk, "types")
+    bootstrap_catalog_sys_columns(app.blk, "objects")
+
     tuples = read_sys_table(app.blk, "columns")
-    print(tuples)
+    for t in tuples:
+        print(t)

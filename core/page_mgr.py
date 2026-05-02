@@ -18,11 +18,15 @@ def sys_hpalloc(sys_page_id):
     global alloc
     return alloc.sys_hpalloc(sys_page_id)
 
+def sys_hpalloc_ref(sys_page_id):
+    global alloc
+    return alloc.sys_hpalloc_ref(sys_page_id)
+
 def ref_sys_page(id):
     global cache_pool
     
     try:
-        return cache_pool.sys_pool[id]
+        return cache_pool.get(id)
     except KeyError:
         page = cache_pool.blkdev.read_page(id)
         cache_pool.sys_cache(page)
@@ -47,13 +51,21 @@ class page_allocator:
         self.blkdev = blkdev
         self.metablock = blkdev.read_metablock()
         self.cache_pool = page_cache_pool(blkdev)
+    
+    def sys_hpalloc_ref(self, page_id):
+        if self.cache_pool.exists(page_id):
+            return self.cache_pool.get(page_id)
+
+        pg = heap_page(page_id)
+        self.cache_pool.cache(pg)
+        return pg
 
     def sys_hpalloc(self, page_id):
-        if self.cache_pool.sys_exists(page_id):
+        if self.cache_pool.exists(page_id):
             raise Exception(f"sys heap page:{page_id} already allocated")
         
         pg = heap_page(page_id)
-        self.cache_pool.sys_cache(pg)
+        self.cache_pool.cache(pg)
         return pg
         
     def palloc(self):
@@ -74,30 +86,23 @@ class page_cache_pool:
     def __init__(self, blkdev):
         self.blkdev = blkdev
         self.pool = {}
-        self.sys_pool = {} # sys pool page is never evicted
     
     def exists(self, id):
         return id in self.pool
-    
-    def sys_exists(self, id):
-        return id in self.sys_pool
     
     def cache(self, pg):
         if pg is None:
             raise Exception("try to cache Null page")
         _info(f"cache page {pg.id}")
         self.pool[pg.id] = pg
-    
-    def sys_cache(self, pg):
-        if pg is None:
-            raise Exception("try to cache Null sys page")
-        _info(f"cache page {pg.id}")
-        self.sys_pool[pg.id] = pg
 
     def commit_all_pages(self):
         for id in self.pool:
             page = self.pool[id]
             self.blkdev.write_page(page)
+        
+    def get(self, id):
+        return self.pool[id]
 
 class pg_mgr:
     def __init__(self, blk, cache_pool):

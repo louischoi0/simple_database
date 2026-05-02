@@ -84,7 +84,12 @@ class StructuredTuple(HeapTuple):
         cursor = buffer_cursor()
         cursor.pad_a(HeapTuple.HEAP_TUPLE_HEADER_SIZE)
 
+        from core.catalog import get_type_val
+
         for idx, c in enumerate(schema.col_arr):
+            if idx == 0 and c.type_val != get_type_val("int"):
+                raise Exception("first column must be int64 as primary key.")
+
             assert c.pos == idx
             value = dictionary[c.name]
 
@@ -196,8 +201,11 @@ class heap_page(page):
         self.cursor.write_int64(0)
         self.deleted.append(index)
     
+    def compact(self):
+        # cleanup all deletions
+        pass
+    
     def write_tuple_data(self, size, data_buffer):
-        # insert write only page buffer
         # todo: write to wal segment for fist instead page buffer directly
         if size < HeapTuple.HEAP_TUPLE_HEADER_SIZE:
             raise Exception(f"heap tuple size underflow: {size}")

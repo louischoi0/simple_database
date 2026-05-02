@@ -225,6 +225,7 @@ class buffer_cursor:
 
         if type_val == get_type_value("int"):
             return self.read_int64()
+
         elif type_val == get_type_value("bool"):
             return self.read_bool()
             
