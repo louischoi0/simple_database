@@ -4,7 +4,7 @@ from utils.buffer_cursor import buffer_cursor
 from utils.dec import *
 from utils.logging import info
 
-XFLAG_SIZE = 4
+XFLAG_SIZE = 8
 _info = lambda msg: info("heap", msg)
 
 class TupleVersion:
@@ -13,7 +13,8 @@ class TupleVersion:
         self.xmax = xmax
 
 class HeapTuple:
-    HEAP_TUPLE_HEADER_SIZE = 32 # size xmin, xmax, reserved (null bit mask for structured heap tuple)
+    HEAP_TUPLE_HEADER_SIZE = 32 # size, xmin, xmax, reserved (null bit mask for structured heap tuple)
+    HEAP_TUPLE_RESERVED_SIZE = 8
 
     def __init__(self, buffer: bytearray):
         self.buffer: bytearray = buffer
@@ -21,21 +22,6 @@ class HeapTuple:
         self.size = cursor.read_int64()
         xmin, xmax = cursor.read_int64(), cursor.read_int64()
         self.version = TupleVersion(xmin, xmax)
-    
-    def create(self, data_buffer, version=None):
-        cursor = buffer_cursor() 
-        heap_tuple_size = len(data_buffer) + HeapTuple.HEAP_TUPLE_HEADER_SIZE
-        
-        cursor.write_int64_a(heap_tuple_size)
-
-        if self.version is None:
-            cursor.pad_a(HeapTuple.HEAP_TUPLE_HEADER_SIZE)
-        else:
-            cursor.write_int64_a(version.xmin)
-            cursor.write_int64_a(version.xmax)
-
-        cursor.write_bytes_a(data_buffer)
-        return HeapTuple(cursor.buffer)
     
     def ser(self):
         return self.buffer
@@ -89,6 +75,7 @@ class StructuredTuple(HeapTuple):
         t.size = cursor.read_int64()
         t.xmin = cursor.read_int64()
         t.xmax = cursor.read_int64()
+        t.reserved = cursor.read_int64()
 
         return t
     
@@ -103,8 +90,8 @@ class StructuredTuple(HeapTuple):
 
             cursor.write_dynamic_type_a(c.type.value, value)
 
-        cursor.at(0) 
         size = len(cursor.buffer)
+        cursor.at(0) 
         cursor.write_int64(size)
 
         if version is None:
@@ -112,15 +99,16 @@ class StructuredTuple(HeapTuple):
         else:
             cursor.write_int64(version.xmin)
             cursor.write_int64(version.xmax)
-
+        
         return StructuredTuple.parse(cursor.buffer)
 
 class heap_page(page):
     SLOT_SIZE = 4
-    SLOT_SEGMENT_OFFSET = HDR_SIZE + 8 + 8
-    TUPLE_SEGMENT_OFFSET = PAGE_SIZE - 16
-    TAIL_SEGMENT_SIZE = 32
+    HEAP_PAGE_HDR_SIZE = 40
+    SLOT_SEGMENT_OFFSET = HEAP_PAGE_HDR_SIZE
     MIN_KEY_OFFSET = 16
+    TAIL_SEGMENT_SIZE = 32
+    TUPLE_SEGMENT_OFFSET = PAGE_SIZE - TAIL_SEGMENT_SIZE
     HEAP_PAGE_HDR_SIZE = HDR_SIZE + 16
 
     def __init__(self, page_id):
@@ -136,15 +124,21 @@ class heap_page(page):
         self.buffer[HDR_SIZE:HDR_SIZE+8] = serint64(self.tuple_count)
 
     def add_slot(self, tuple_size):
+        last = self.slot_cursor
         self.slot_cursor -= tuple_size
+
+        if tuple_size < HeapTuple.HEAP_TUPLE_HEADER_SIZE:
+            raise Exception(f"heap tuple size smaller than HEAP_TUPLE_HEADER_SIZE, {tuple_size}")
 
         if self.slot_cursor < heap_page.SLOT_SEGMENT_OFFSET:
             raise Exception(f"heap page overflow error: tried to write tuple data at pos:{self.slot_cursor}")
 
-        slot_buffer_offset = heap_page.SLOT_SEGMENT_OFFSET + (self.tuple_count * self.SLOT_SIZE)
-        self.buffer[slot_buffer_offset: slot_buffer_offset + self.SLOT_SIZE] = serint32(self.slot_cursor)
+        slot_buffer_offset = heap_page.SLOT_SEGMENT_OFFSET + ((self.tuple_count - 1) * self.SLOT_SIZE)
 
-        _info(f"add slot to heap page:{self.id} index={self.tuple_count-1}, value={self.slot_cursor}")
+        self.cursor.at(slot_buffer_offset)
+        self.cursor.write_int32(self.slot_cursor)
+
+        _info(f"add slot to heap page:{self.id} index={self.tuple_count-1}, offset={slot_buffer_offset}, value={self.slot_cursor}, tuple_size={last - self.slot_cursor}")
         self.slots.append(self.slot_cursor)
     
     def raw_map(self, f):
@@ -157,6 +151,7 @@ class heap_page(page):
 
             cursor.at(tuple_pos)
             size = cursor.read_int64()
+
             assert size > 0
             cursor.at(tuple_pos)
             buffer = cursor.read(size)
@@ -165,13 +160,23 @@ class heap_page(page):
 
         return res
     
+    def load_slots_from_buffer(self):
+        cursor = self.cursor
+        cursor.at(heap_page.SLOT_SEGMENT_OFFSET)
+
+        self.slots = []
+
+        for _ in range(self.tuple_count):
+            slot = cursor.read_int32()
+            self.slots.append(slot)
+    
     def activate(self):
         # after read page buffer from disk
         # activate function fill all vars of instance
         # check deleted tuples and put it self.deleted
         self.acquire_lock()
-
         self.apply_header_buffer()
+        self.load_slots_from_buffer()
         self.deleted = []
 
         for i, pos in enumerate(self.slots):
@@ -194,7 +199,12 @@ class heap_page(page):
     def write_tuple_data(self, size, data_buffer):
         # insert write only page buffer
         # todo: write to wal segment for fist instead page buffer directly
-        _info(f"write tuple data from={self.slot_cursor} to {self.slot_cursor+size}")
+        if size < HeapTuple.HEAP_TUPLE_HEADER_SIZE:
+            raise Exception(f"heap tuple size underflow: {size}")
+
+        self.cursor.at(self.slot_cursor)
+
+        _info(f"write tuple data from={self.slot_cursor} to {self.slot_cursor+size}, size={size}")
         self.cursor.at(self.slot_cursor)
         self.cursor.write_raw(data_buffer)
 
@@ -215,7 +225,6 @@ class heap_page(page):
  
     def update_header_buffer(self):
         header_buffer = self.ser_header()
-
         assert len(header_buffer) == heap_page.HEAP_PAGE_HDR_SIZE
 
         self.buffer[:len(header_buffer)] = header_buffer
@@ -259,8 +268,7 @@ class heap_page(page):
 
     def apply_header_buffer(self):
         key, type, min_key, tuple_count, slot_cursor = self.parse_header_buffer(self.buffer)
-        c = buffer_cursor(self.buffer, key)
-        c.advance(HDR_SIZE)
+        self.cursor = buffer_cursor(self.buffer)
 
         self.key = key
         self.type = type

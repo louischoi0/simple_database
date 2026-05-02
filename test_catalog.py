@@ -1,4 +1,5 @@
-from core.catalog import Object, SysObject, get_sys_namespace, get_type, Attribute, get_sys_object_id, bootstrap_catalog_sys_types
+from core.catalog import Object, SysObject, get_sys_namespace, get_type, Attribute, get_sys_object_id
+from core.catalog import bootstrap_catalog_sys_types, read_sys_types_tuples, bootstrap_catalog_sys_columns, read_sys_table, read_sys_columns_tuples
 from core.catalog import sys_types_schema
 from core.heap import StructuredTuple, heap_page as HeapPage
 from core.blk import _init_blk_driver
@@ -51,3 +52,8 @@ if __name__ == '__main__':
     app.activate()
 
     bootstrap_catalog_sys_types(app.blk)
+    tuples = read_sys_table(app.blk, "types")
+
+    bootstrap_catalog_sys_columns(app.blk)
+    tuples = read_sys_table(app.blk, "columns")
+    print(tuples)

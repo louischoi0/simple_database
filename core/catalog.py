@@ -211,6 +211,7 @@ TYPES_LEN = {
 
 def get_type_by_val(type_val):
     for t in TYPES:
+        t = TYPES[t]
         if t.value == type_val:
             return t
 
@@ -231,14 +232,17 @@ def get_type_len(name):
         name = "type_" + name
     return TYPES_LEN[name]
 
+def get_type_len_by_val(val):
+    return get_type_len(get_type_by_val(val).name)
+
 def add_attr(ref_oid, attr):
     pass
 
 obj_sys_types_table = SysObject(100, obj_sys_namespace, "types", get_type("table"))
 obj_sys_classes_table = SysObject(110, obj_sys_namespace, "classes", get_type("table"))
-obj_sys_columns_table = SysObject(110, obj_sys_namespace, "columns", get_type("table"))
-obj_sys_attributes_table = SysObject(110, obj_sys_namespace, "attributes", get_type("table"))
-obj_sys_proc_table = SysObject(110, obj_sys_namespace, "proc", get_type("table"))
+obj_sys_columns_table = SysObject(111, obj_sys_namespace, "columns", get_type("table"))
+obj_sys_attributes_table = SysObject(112, obj_sys_namespace, "attributes", get_type("table"))
+obj_sys_proc_table = SysObject(113, obj_sys_namespace, "proc", get_type("table"))
 
 #add_attr(get_sys_object_id("types"), SysAttribute(101, get_sys_object_id("types"), "table_desc_page", CATALOG_PAGE_ID__SYS_TABLE_TYPES_DESC))
 #add_attr(get_sys_object_id("classes"), SysAttribute(111, get_sys_object_id("tables"), "table_desc_page", CATALOG_PAGE_ID__SYS_TABLE_TABLES_TABLE_DESC))
@@ -253,35 +257,39 @@ SYS_TABLE_DESC_MAP = {
     "tables": CATALOG__SYS_TABLES_TABLE_DESC,
 }
 
-def get_sys_table_desc(name):
-    return SYS_TABLE_DESC_MAP
+def get_sys_table_desc(name: name) -> int:
+    return SYS_TABLE_DESC_MAP[name]
 
 class Column(Object):
-    def __init__(self, rel_id, pos, name, type, notnull=True, default_val=None):
+    def __init__(self, rel_id, pos, name, type_val, notnull=True, defval=None):
         self.rel_id = rel_id
         self.pos = pos
         self.name = name
-        self.type = type
-        self.len = get_type_len(type.name)
+        self.type_val = type_val
+        self.type = get_type_by_val(type_val)
+        self.len = get_type_len_by_val(type_val)
         self.notnull = notnull
-        self.default_val = default_val
+        self.defval = defval
 
 class Schema:
     def __init__(self, columns):
         self.col_arr = columns
         self.col_map = { x.name: x for x in columns }
     
-    def has_default_value(self, index):
-        return self.col_arr[index].default_val is not None
+    def has_defval(self, index):
+        return self.col_arr[index].defval is not None
     
-    def get_default_value(self, index):
-        return self.col_arr[index].default_val
+    def get_defval(self, index):
+        return self.col_arr[index].defval
     
     def is_notnull(self, index):
         return self.col_arr[index].notnull
     
     def get(self, name):
         return self.col_map[name]
+    
+    def get_attribute(self, name, attr):
+        return getattr(self.col_map[name], attr)
     
     def raw(self):
         res = []
@@ -293,37 +301,115 @@ class Schema:
             d["type"] = col.type
             d["len"] = col.len
             d["notnull"] = col.notnull
-            d["default_val"] = col.default_val
+            d["defval"] = col.defval
 
             res.append(d)
         return res
 
 sys_columns_schema = Schema([
-    Column(get_sys_object_id("columns"), 0, "rel_id", get_type("int"), notnull=True, default_val=None),
-    Column(get_sys_object_id("columns"), 1, "pos", get_type("int"), notnull=True, default_val=None),
-    Column(get_sys_object_id("columns"), 2, "name", get_type("varchar"), notnull=True, default_val=None),
-    Column(get_sys_object_id("columns"), 3, "type_val", get_type("int"), notnull=True, default_val=None),
-    Column(get_sys_object_id("columns"), 4, "len", get_type("int"), notnull=True, default_val=None),
-    Column(get_sys_object_id("columns"), 5, "notnull", get_type("bool"), notnull=True, default_val=True),
-    Column(get_sys_object_id("columns"), 5, "defval", get_type("bytes"), notnull=True, default_val=True),
+    Column(get_sys_object_id("columns"), 0, "rel_id", get_type_val("int"), notnull=True, defval=None),
+    Column(get_sys_object_id("columns"), 1, "pos", get_type_val("int"), notnull=True, defval=None),
+    Column(get_sys_object_id("columns"), 2, "name", get_type_val("varchar"), notnull=True, defval=None),
+    Column(get_sys_object_id("columns"), 3, "type_val", get_type_val("int"), notnull=True, defval=None),
+    Column(get_sys_object_id("columns"), 4, "len", get_type_val("int"), notnull=True, defval=None),
+    Column(get_sys_object_id("columns"), 5, "notnull", get_type_val("bool"), notnull=True, defval=None),
+    Column(get_sys_object_id("columns"), 6, "defval", get_type_val("bytes"), notnull=True, defval=None),
 ])
 
 cache_table_schema(get_sys_object_id("columns"), sys_columns_schema)
 
 sys_types_schema = Schema([
-    Column(get_sys_object_id("types"), 0, "oid", get_type("int"), notnull=True, default_val=None),
-    Column(get_sys_object_id("types"), 1, "name", get_type("varchar"), notnull=True, default_val=None),
-    Column(get_sys_object_id("types"), 2, "type_val", get_type("int"), notnull=True, default_val=None),
-    Column(get_sys_object_id("types"), 3, "len", get_type("int"), notnull=True, default_val=None),
+    Column(get_sys_object_id("types"), 0, "oid", get_type_val("int"), notnull=True, defval=None),
+    Column(get_sys_object_id("types"), 1, "name", get_type_val("varchar"), notnull=True, defval=None),
+    Column(get_sys_object_id("types"), 2, "type_val", get_type_val("int"), notnull=True, defval=None),
+    Column(get_sys_object_id("types"), 3, "len", get_type_val("int"), notnull=True, defval=None),
 ])
 
 cache_table_schema(get_sys_object_id("types"), sys_types_schema)
+
+def bootstrap_catalog_sys_columns(blk):
+    _info(f"sys_columns bootstrapping...")
+    hpage = sys_hpalloc(get_sys_table_desc("columns"))
+
+    tuples = [
+        {
+            "rel_id": get_sys_object_id("columns"),
+            "pos":  sys_columns_schema.get_attribute("rel_id", "pos"),
+            "name":  sys_columns_schema.get_attribute("rel_id", "name"),
+            "type_val":  sys_columns_schema.get_attribute("rel_id", "type_val"),
+            "len":  sys_columns_schema.get_attribute("rel_id", "len"),
+            "notnull":  sys_columns_schema.get_attribute("rel_id", "notnull"),
+            "defval":  sys_columns_schema.get_attribute("rel_id", "defval"),
+        },
+        {
+            "rel_id": get_sys_object_id("columns"),
+            "pos":  sys_columns_schema.get_attribute("pos", "pos"),
+            "name":  sys_columns_schema.get_attribute("pos", "name"),
+            "type_val":  sys_columns_schema.get_attribute("pos", "type_val"),
+            "len":  sys_columns_schema.get_attribute("pos", "len"),
+            "notnull":  sys_columns_schema.get_attribute("pos", "notnull"),
+            "defval":  sys_columns_schema.get_attribute("pos", "defval"),
+        },
+        {
+            "rel_id": get_sys_object_id("columns"),
+            "pos":  sys_columns_schema.get_attribute("name", "pos"),
+            "name":  sys_columns_schema.get_attribute("name", "name"),
+            "type_val":  sys_columns_schema.get_attribute("name", "type_val"),
+            "len":  sys_columns_schema.get_attribute("name", "len"),
+            "notnull":  sys_columns_schema.get_attribute("name", "notnull"),
+            "defval":  sys_columns_schema.get_attribute("name", "defval"),
+        },
+        {
+            "rel_id": get_sys_object_id("columns"),
+            "pos":  sys_columns_schema.get_attribute("type_val", "pos"),
+            "name":  sys_columns_schema.get_attribute("type_val", "name"),
+            "type_val":  sys_columns_schema.get_attribute("type_val", "type_val"),
+            "len":  sys_columns_schema.get_attribute("type_val", "len"),
+            "notnull":  sys_columns_schema.get_attribute("type_val", "notnull"),
+            "defval":  sys_columns_schema.get_attribute("type_val", "defval"),
+        },
+        {
+            "rel_id": get_sys_object_id("columns"),
+            "pos":  sys_columns_schema.get_attribute("len", "pos"),
+            "name":  sys_columns_schema.get_attribute("len", "name"),
+            "type_val":  sys_columns_schema.get_attribute("len", "type_val"),
+            "len":  sys_columns_schema.get_attribute("len", "len"),
+            "notnull":  sys_columns_schema.get_attribute("len", "notnull"),
+            "defval":  sys_columns_schema.get_attribute("len", "defval"),
+        },
+        {
+            "rel_id": get_sys_object_id("columns"),
+            "pos":  sys_columns_schema.get_attribute("notnull", "pos"),
+            "name":  sys_columns_schema.get_attribute("notnull", "name"),
+            "type_val":  sys_columns_schema.get_attribute("notnull", "type_val"),
+            "len":  sys_columns_schema.get_attribute("notnull", "len"),
+            "notnull":  sys_columns_schema.get_attribute("notnull", "notnull"),
+            "defval":  sys_columns_schema.get_attribute("notnull", "defval"),
+        },
+        {
+            "rel_id": get_sys_object_id("columns"),
+            "pos":  sys_columns_schema.get_attribute("defval", "pos"),
+            "name":  sys_columns_schema.get_attribute("defval", "name"),
+            "type_val":  sys_columns_schema.get_attribute("defval", "type_val"),
+            "len":  sys_columns_schema.get_attribute("defval", "len"),
+            "notnull":  sys_columns_schema.get_attribute("defval", "notnull"),
+            "defval":  sys_columns_schema.get_attribute("defval", "defval"),
+        },
+    ]
+
+    for column_tuple in tuples:
+        tuple = StructuredTuple.load(sys_columns_schema, column_tuple)
+        hpage.insert(tuple)
+
+    hpage.update_header_buffer()
+    blk.write_page(hpage)
+    _info(f"sys_columns table initialized: {hpage.checksum()}")
 
 def bootstrap_catalog_sys_types(blk):
     _info(f"sys_types bootstrapping ...")
     hpage = sys_hpalloc(get_sys_table_desc("types"))
 
-    column_tuples = [
+    tuples = [
         {
             "oid": get_type_oid("int"),
             "name": get_type_name("int"),
@@ -350,7 +436,7 @@ def bootstrap_catalog_sys_types(blk):
         }
     ]
 
-    for column_tuple in column_tuples:
+    for column_tuple in tuples:
         tuple = StructuredTuple.load(sys_types_schema, column_tuple)
         hpage.insert(tuple)
 
@@ -358,12 +444,28 @@ def bootstrap_catalog_sys_types(blk):
     blk.write_page(hpage)
     _info(f"sys_types table initialized: {hpage.checksum()}")
 
+def read_sys_table(blk, table_name):
+    table_oid = get_sys_object_id(table_name)
+    schema = get_table_schema_from_cache(table_oid)
+    desc_page_num = get_sys_table_desc(table_name)
+
+    page = blk.read_page(desc_page_num)
+    heap_page = page.as_heap()
+    heap_page.activate()
+
+    return heap_page.raw_map(lambda buffer: StructuredTuple.parse(buffer).struct(sys_types_schema))
 
 def read_sys_types_tuples(blk):
     page = blk.read_page(get_sys_table_desc("types"))
     heap_page = page.as_heap()
     heap_page.activate()
 
+    return heap_page.raw_map(lambda buffer: StructuredTuple.parse(buffer).struct(sys_types_schema))
 
+def read_sys_columns_tuples(blk):
+    page = blk.read_page(get_sys_table_desc("columns"))
+    heap_page = page.as_heap()
+    heap_page.activate()
 
-
+    types = heap_page.raw_map(lambda buffer: StructuredTuple.parse(buffer).struct(sys_columns_schema))
+    return types

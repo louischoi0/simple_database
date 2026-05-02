@@ -1,6 +1,5 @@
 from utils.buffer_cursor import buffer_cursor
 
-
 def test_buffer_cursor_rwint64():
     cursor_w = buffer_cursor()
     cursor_r = buffer_cursor()
@@ -34,3 +33,20 @@ def test_buffer_cursor_bool():
     assert cursor_r.read_bool()
     assert not cursor_r.read_bool()
     assert cursor_r.read_bool()
+
+def test_buffer_cursor_bytes():
+    cursor_w = buffer_cursor()
+    cursor_r = buffer_cursor()
+
+    cursor_w.write_bytes_a(b'00000')
+    cursor_w.write_bytes_a(b'00001')
+    cursor_w.write_bytes_a(b'00002')
+
+    cursor_r.buffer = cursor_w.buffer
+
+    print(cursor_r.read_bytes())
+    print(cursor_r.read_bytes())
+    print(cursor_r.read_bytes())
+
+if __name__ == "__main__":
+    test_buffer_cursor_bytes()
