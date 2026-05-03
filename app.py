@@ -2,7 +2,7 @@ import sys
 import threading
 
 from core.blk import _init_blk_driver
-from core.page_mgr import page_allocator, _init_mgr_module, pg_mgr
+from core.page_mgr import page_allocator, _init_mgr_module, PageManager
 from core.page import get_page_name, is_btree_page, is_heap_page
 from core.const import *
 from core.btree import bt_node
@@ -217,15 +217,6 @@ def exec_command(cmd, app):
 
 PROCS = {}
 
-def fork_pg_mgr_proc(blk, allocator):
-    pg_mgr_inst = pg_mgr(blk, allocator.cache_pool)
-    import threading
-    
-    th = threading.Thread(target=pg_mgr_inst.proc)
-
-    PROCS["pg_mgr"] = th
-    return th
-
 def start_app_procs():
     for th in PROCS:
         th.start()
@@ -233,8 +224,6 @@ def start_app_procs():
 def bootstrap_main():
     app = DBMaster()
     app.activate()
-
-    fork_pg_mgr_proc(app.blk, app.alloc)
     return app
     
 if __name__ == "__main__":

@@ -3,11 +3,13 @@ from core.catalog import Column, get_type_val, get_type, Schema, bootstrap_catal
 from core.page import page
 from core.blk import _init_blk_driver
 from utils.buffer_cursor import buffer_cursor
+from core.const import *
+from core.dbmaster import DBMaster
 
 test_table_schema = Schema([
-    Column(0, 0, "student_id", get_type_val("int"), notnull=True, defval=None),
-    Column(0, 1, "name", get_type_val("varchar"), notnull=True, defval=None),
-    Column(0, 2, "grade", get_type_val("int"), notnull=True, defval=None),
+    Column(0, 0, 0, "student_id", get_type_val("int"), notnull=True, defval=None),
+    Column(0, 0, 1, "name", get_type_val("varchar"), notnull=True, defval=None),
+    Column(0, 0, 2, "grade", get_type_val("int"), notnull=True, defval=None),
     #Column(0, 3, "grade2", get_type_val("int"), notnull=True, defval=None),
 ])
 
@@ -35,10 +37,10 @@ def test_structed_tuple2():
     for k in data_template:
         assert st.get(k) == st2.get(k)
 
-def test_structured_tuple():
+def test_heap_page_grow(app):
     datas = []
 
-    for i in range(10):
+    for i in range(400):
         item = data_template.copy()
         item["student_id"] = i
         item["name"] += str(i)
@@ -49,7 +51,45 @@ def test_structured_tuple():
 
         datas.append(item)
 
-    heap = HeapPage(0)
+    heap = app.alloc.hpalloc()
+    c = 0
+    for i in datas:
+        cursor = buffer_cursor(i.buffer)
+        cursor.at(0)
+        size = cursor.read_int64()
+
+        heap.insert(i)
+        c += 1
+    
+    next_page_id = heap.read_next_page_pointer()
+    page = heap
+
+    while next_page_id != NULL_PAGE:
+        next_page_id = page.read_next_page_pointer()
+        if next_page_id == 0:
+            break
+        
+        else:
+            assert page.id + 1 == next_page_id
+
+        from core.page_mgr import ref_page
+        page = ref_page(next_page_id)
+
+def test_structured_tuple(app):
+    datas = []
+
+    for i in range(20):
+        item = data_template.copy()
+        item["student_id"] = i
+        item["name"] += str(i)
+        item["grade"] = i % 4
+
+        item = StructuredTuple.load(test_table_schema, item)
+        item.struct(test_table_schema)
+
+        datas.append(item)
+
+    heap = app.alloc.hpalloc()
 
     for i in datas:
         cursor = buffer_cursor(i.buffer)
@@ -83,5 +123,12 @@ def test_structured_tuple():
     print(heap.checksum())
 
 if __name__ == '__main__':
+    app = DBMaster(2)
+    app.activate()
+    app.alloc.metablock.set_max_page(2)
+
     test_structed_tuple2()
-    test_structured_tuple()
+    test_structured_tuple(app)
+    test_heap_page_grow(app)
+
+    app.terminate()

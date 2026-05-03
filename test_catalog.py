@@ -1,6 +1,6 @@
 from core.catalog import Object, SysObject, get_sys_namespace, get_type, Attribute, get_sys_object_id, sys_columns_schema
 from core.catalog import bootstrap_catalog_sys_types, read_sys_types_tuples, bootstrap_catalog_sys_columns, read_sys_table, read_sys_columns_tuples
-from core.catalog import bootstrap_catalog_sys_objects
+from core.catalog import bootstrap_catalog_sys_objects, bootstrap_catalog_sys_tables
 from core.catalog import sys_types_schema
 from core.heap import StructuredTuple, heap_page as HeapPage
 from core.blk import _init_blk_driver
@@ -64,19 +64,28 @@ if __name__ == '__main__':
     app = DBMaster(2)
     app.activate()
 
-    bootstrap_catalog_sys_objects(app.blk)
-    tuples = read_sys_table(app.blk, "objects")
+    bootstrap_catalog_sys_types()
+    tuples = read_sys_table("types")
     for t in tuples:
         print(t)
-    exit(0)
 
-    bootstrap_catalog_sys_types(app.blk)
-    tuples = read_sys_table(app.blk, "types")
-
-    bootstrap_catalog_sys_columns(app.blk, "columns")
-    bootstrap_catalog_sys_columns(app.blk, "types")
-    bootstrap_catalog_sys_columns(app.blk, "objects")
-
-    tuples = read_sys_table(app.blk, "columns")
+    bootstrap_catalog_sys_objects()
+    tuples = read_sys_table("objects")
     for t in tuples:
         print(t)
+
+    tuples = bootstrap_catalog_sys_tables()
+    tuples = read_sys_table("objects")
+    for t in tuples:
+        print(t)
+
+    bootstrap_catalog_sys_columns("columns")
+    bootstrap_catalog_sys_columns("types")
+    bootstrap_catalog_sys_columns("objects")
+    bootstrap_catalog_sys_columns("tables")
+
+    tuples = read_sys_table("columns")
+    for t in tuples:
+        print(t)
+
+    app.terminate()

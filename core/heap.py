@@ -114,6 +114,7 @@ class heap_page(page):
     MIN_KEY_OFFSET = 16
     TAIL_SEGMENT_SIZE = 32
     TUPLE_SEGMENT_OFFSET = PAGE_SIZE - TAIL_SEGMENT_SIZE
+    HEAP_NEXT_PAGE_POINTER_OFFSET = PAGE_SIZE - 8
     HEAP_PAGE_HDR_SIZE = HDR_SIZE + 16
 
     def __init__(self, page_id):
@@ -123,10 +124,19 @@ class heap_page(page):
         self.slots = []
         self.deleted = []
         self.cursor = buffer_cursor(self.buffer)
+        self.activated = False
     
+    def read_next_page_pointer(self):
+        self.cursor.at(heap_page.HEAP_NEXT_PAGE_POINTER_OFFSET)
+        return self.cursor.read_int64()
+    
+    def set_next_page_pointer(self, next_page_id):
+        self.cursor.at(heap_page.HEAP_NEXT_PAGE_POINTER_OFFSET)
+        self.cursor.write_int64(next_page_id)
+
     def write_tuple_count(self):
         _info(f"write tuple_count to heap page:{self.id} count={self.tuple_count}")
-        self.buffer[HDR_SIZE:HDR_SIZE+8] = serint64(self.tuple_count)
+        self.buffer[HDR_SIZE: HDR_SIZE+8] = serint64(self.tuple_count)
 
     def add_slot(self, tuple_size):
         last = self.slot_cursor
@@ -136,15 +146,36 @@ class heap_page(page):
             raise Exception(f"heap tuple size smaller than HEAP_TUPLE_HEADER_SIZE, {tuple_size}")
 
         if self.slot_cursor < heap_page.SLOT_SEGMENT_OFFSET:
-            raise Exception(f"heap page overflow error: tried to write tuple data at pos:{self.slot_cursor}")
+            raise Exception(f"heap page overflow error: tried to write tuple data at pos:{self.slot_cursor}, cap:{self.capacity()}")
 
         slot_buffer_offset = heap_page.SLOT_SEGMENT_OFFSET + ((self.tuple_count - 1) * self.SLOT_SIZE)
+        _info(f"add slot to heap page:{self.id} index={self.tuple_count-1}, offset={slot_buffer_offset}, value={self.slot_cursor}, tuple_size={last - self.slot_cursor}, cap:{self.capacity()}")
 
         self.cursor.at(slot_buffer_offset)
         self.cursor.write_int32(self.slot_cursor)
 
-        _info(f"add slot to heap page:{self.id} index={self.tuple_count-1}, offset={slot_buffer_offset}, value={self.slot_cursor}, tuple_size={last - self.slot_cursor}")
         self.slots.append(self.slot_cursor)
+    
+    def get(self, pk):
+        cursor = self.cursor
+        res = []
+
+        for index, tuple_pos in enumerate(self.slots):
+            if index in self.deleted:
+                continue 
+
+            cursor.at(tuple_pos)
+            size = cursor.read_int64()
+
+            assert size > 0
+            
+            cursor.at(tuple_pos)
+            buffer = cursor.read(size)
+
+            if cursor.read_int64() == pk:
+                return buffer
+
+        return res
     
     def raw_map(self, f):
         cursor = self.cursor
@@ -180,6 +211,10 @@ class heap_page(page):
         # activate function fill all vars of instance
         # check deleted tuples and put it self.deleted
         self.acquire_lock()
+
+        if self.activated:
+            return
+
         self.apply_header_buffer()
         self.load_slots_from_buffer()
         self.deleted = []
@@ -189,7 +224,8 @@ class heap_page(page):
             size = self.cursor.read_int64()
             if size == 0:
                 self.deleted.append(i)
-        
+
+        self.activated = True        
         self.release_lock()
     
     def delete_tuple_by_index(self, index):
@@ -215,18 +251,26 @@ class heap_page(page):
         _info(f"write tuple data from={self.slot_cursor} to {self.slot_cursor+size}, size={size}")
         self.cursor.at(self.slot_cursor)
         self.cursor.write_raw(data_buffer)
+     
+    def capacity(self):
+        return self.slot_cursor - (heap_page.SLOT_SEGMENT_OFFSET + (heap_page.SLOT_SIZE * (self.tuple_count + 1)))
 
     def insert(self, t):
-        self.acquire_lock()
+        with self.lock:
+            assert self.id != NULL_PAGE
 
-        self.tuple_count += 1
-        data_buffer = t.buffer
+            self.tuple_count += 1
+            data_buffer = t.buffer
 
-        self.write_tuple_count()
-        self.add_slot(t.size)
-        self.write_tuple_data(t.size, data_buffer)
+            if t.size > self.capacity():
+                return 0
 
-        self.release_lock()
+            self.write_tuple_count()
+            self.add_slot(t.size)
+            self.write_tuple_data(t.size, data_buffer)
+
+            self.update_header_buffer()
+            return 1
     
     def ptype(self):
         return "heap"
@@ -283,3 +327,39 @@ class heap_page(page):
         self.min_key = min_key
         self.tuple_count = tuple_count
         self.slot_cursor = slot_cursor
+
+def grow(alloc_func, overflow_page, t):
+    # caller must be holding page lock
+    _info(f"grow page {overflow_page.id} to insert tuple sized: {t.size}, cap={overflow_page.capacity()}")
+
+    heap_page = alloc_func()
+
+    overflow_page.set_next_page_pointer(heap_page.id)
+    overflow_page.mark_dirty_flag()
+    return heap_page
+
+def insert_with_grow(alloc_func, heap_page_to_insert, t):
+    heap_page_to_insert.acquire_lock()
+
+    next_page_id = heap_page_to_insert.read_next_page_pointer()
+    from core.page_mgr import ref_page
+
+    while next_page_id != NULL_PAGE:
+        heap_page_to_insert.release_lock()
+        heap_page_to_insert = ref_page(next_page_id)
+        heap_page_to_insert.activate()
+        heap_page_to_insert.acquire_lock()
+
+        next_page_id = heap_page_to_insert.read_next_page_pointer()
+    
+    if t.size > heap_page_to_insert.capacity():
+        new_page = grow(alloc_func, heap_page_to_insert, t)
+        heap_page_to_insert.release_lock()
+        return new_page
+    else:
+        heap_page_to_insert.release_lock()
+        heap_page_to_insert.insert(t)
+        return heap_page_to_insert
+
+
+

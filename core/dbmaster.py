@@ -1,5 +1,6 @@
 from core.blk import _init_blk_driver
-from core.page_mgr import _init_mgr_module
+from core.page_mgr import _init_mgr_module, PageManager
+import threading
 
 class DBMaster:
     def __init__(self, driver_num=0):
@@ -7,6 +8,7 @@ class DBMaster:
         self.blk = None
         self.alloc = None
         self.cache_pool = None
+        self.procs = {}
 
     def activate(self):
         blk = _init_blk_driver(self.driver_num)
@@ -15,3 +17,18 @@ class DBMaster:
         self.blk = blk
         self.alloc = alloc
         self.cache_pool = cache_pool
+
+        self.fork_pg_mgr_proc()
+
+    def fork_pg_mgr_proc(self):
+        self.pg_mgr = PageManager(self.blk, self.cache_pool)
+        import threading
+        
+        th = threading.Thread(target=self.pg_mgr.proc)
+
+        self.procs["pg_mgr"] = th
+        th.start()
+        return th
+    
+    def terminate(self):
+        self.pg_mgr.wait_to_terminate()

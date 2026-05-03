@@ -2,6 +2,7 @@ from core.page import page
 from core.heap import heap_page
 from utils.logging import info
 from core.helper import _minkey
+import threading
 
 global alloc
 global cache_pool
@@ -14,6 +15,10 @@ def global_palloc():
     global alloc
     return alloc.palloc()
 
+def global_hpalloc():
+    global alloc
+    return alloc.hpalloc()
+
 def sys_hpalloc(sys_page_id):
     global alloc
     return alloc.sys_hpalloc(sys_page_id)
@@ -21,16 +26,6 @@ def sys_hpalloc(sys_page_id):
 def sys_hpalloc_ref(sys_page_id):
     global alloc
     return alloc.sys_hpalloc_ref(sys_page_id)
-
-def ref_sys_page(id):
-    global cache_pool
-    
-    try:
-        return cache_pool.get(id)
-    except KeyError:
-        page = cache_pool.blkdev.read_page(id)
-        cache_pool.sys_cache(page)
-        return page
 
 def ref_page(id):
     global cache_pool
@@ -41,6 +36,10 @@ def ref_page(id):
         page = cache_pool.blkdev.read_page(id)
         cache_pool.cache(page)
         return page
+
+def global_write_page(pg):
+    global alloc
+    return alloc.blkdev.write_page(pg)
 
 def ref_minkey(id):
     pg = ref_page(id)
@@ -77,6 +76,7 @@ class page_allocator:
 
     def hpalloc(self):
         new_page_id = self.metablock.inc() - 1
+        print("new page id: ", new_page_id)
         _info("heap page alloc: %d" % new_page_id)
         pg = heap_page(new_page_id)
         self.cache_pool.cache(pg)
@@ -104,24 +104,39 @@ class page_cache_pool:
     def get(self, id):
         return self.pool[id]
 
-class pg_mgr:
+class PageManager:
     def __init__(self, blk, cache_pool):
         self.blk = blk
         self.cache_pool = cache_pool
+        self.lock = threading.Lock()
+        self.exit_signal = False
     
     def proc(self):
+        _info("start page manager process")
         while True:
+            if self.exit_signal:
+                _info("exit signal received, terminate page manager process.")
+                break
+
+            self.lock.acquire()
             self.commit_dirty_pages()
+            self.lock.release()
 
             from time import sleep
-            sleep(1)
+            sleep(0.5)
+    
+    def wait_to_terminate(self):
+        self.lock.acquire()
+        self.commit_dirty_pages()
+        self.exit_signal = True
 
     def commit_dirty_pages(self):
         for pgid in self.cache_pool.pool:
             pg = self.cache_pool.pool[pgid]
             pg.acquire_lock()
             if pg.dirty:
-                blk.write_page(pg)
+                self.blk.write_page(pg)
+                pg.clear_dirty_flag()
             pg.release_lock()
 
 def _init_mgr_module(blkdev):
