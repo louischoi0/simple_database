@@ -60,6 +60,8 @@ class StructuredTuple(HeapTuple):
         return bool(value & (1 << colnum))
     
     def set_null_flag(self, colnum, flag):
+        cursor = buffer_cursor(self.buffer)
+
         value = self.get_null_flag_buffer()
         value = (value & ~(1 << colnum)) | (int(flag) << colnum)
 
@@ -80,7 +82,7 @@ class StructuredTuple(HeapTuple):
         return t
     
     @classmethod
-    def load(self, schema, dictionary, version=None) -> StructuredTuple: 
+    def load(self, schema, dictionary, version=None): 
         cursor = buffer_cursor()
         cursor.pad_a(HeapTuple.HEAP_TUPLE_HEADER_SIZE)
 
@@ -133,6 +135,9 @@ class heap_page(page):
     def set_next_page_pointer(self, next_page_id):
         self.cursor.at(heap_page.HEAP_NEXT_PAGE_POINTER_OFFSET)
         self.cursor.write_int64(next_page_id)
+    
+    def has_next(self):
+        return self.read_next_page_pointer() != 0
 
     def write_tuple_count(self):
         _info(f"write tuple_count to heap page:{self.id} count={self.tuple_count}")
@@ -156,7 +161,7 @@ class heap_page(page):
 
         self.slots.append(self.slot_cursor)
     
-    def get(self, pk):
+    def raw_get(self, pk):
         cursor = self.cursor
         res = []
 
@@ -174,6 +179,27 @@ class heap_page(page):
 
             if cursor.read_int64() == pk:
                 return buffer
+
+        return res
+    
+    def raw_filter(self, f, raw_filter_func):
+        cursor = self.cursor
+        res = []
+
+        for index, tuple_pos in enumerate(self.slots):
+            if index in self.deleted:
+                continue 
+
+            cursor.at(tuple_pos)
+            size = cursor.read_int64()
+
+            assert size > 0
+            cursor.at(tuple_pos)
+            buffer = cursor.read(size)
+            item = f(buffer)
+
+            if raw_filter_func(item):
+                res.append(item)
 
         return res
     

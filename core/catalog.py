@@ -174,6 +174,9 @@ obj_sys_namespace = SysObject(0, None, "namespaceSys", None, value=0, value_is_n
 def get_sys_namespace():
     return obj_sys_namespace
 
+def is_sys_namespace(namespace):
+    return obj_sys_namespace.oid == namespace.oid
+
 type_type = Object(1, None, "typeType", None)
 type_type.namespace = get_sys_namespace()
 type_type.type = type_type
@@ -277,7 +280,7 @@ SYS_TABLE_DESC_MAP = {
     "tables": CATALOG__SYS_TABLES_TABLE_DESC,
 }
 
-def get_sys_table_desc(name: name) -> int:
+def get_sys_table_desc(name: str) -> int:
     return SYS_TABLE_DESC_MAP[name]
 
 class Column(Object):
@@ -341,6 +344,14 @@ def generate_sys_col_oid():
     SYS_COL_OID_COUNTER += 1
     return SYS_COL_OID_COUNTER
 
+global USER_OBJ_OID_COUNTER
+USER_OBJ_OID_COUNTER = 4000
+
+def generate_user_oid():
+    global USER_OBJ_OID_COUNTER
+    USER_OBJ_OID_COUNTER += 1
+    return USER_OBJ_OID_COUNTER 
+
 sys_columns_schema = Schema([
     Column(generate_sys_col_oid(), get_sys_object_id("columns"), 0, "oid", get_type_val("int"), notnull=True, defval=None),
     Column(generate_sys_col_oid(), get_sys_object_id("columns"), 1, "rel_id", get_type_val("int"), notnull=True, defval=None),
@@ -376,7 +387,7 @@ sys_tables_schema = Schema([
     Column(generate_sys_col_oid(), get_sys_object_id("tables"), 0, "oid", get_type_val("int"), notnull=True, defval=None),
     Column(generate_sys_col_oid(), get_sys_object_id("tables"), 1, "namespace", get_type_val("int"), notnull=True, defval=None),
     Column(generate_sys_col_oid(), get_sys_object_id("tables"), 2, "name", get_type_val("varchar"), notnull=True, defval=None),
-    Column(generate_sys_col_oid(), get_sys_object_id("tables"), 3, "desc_page_num", get_type_val("int"), notnull=True, defval=None),
+    Column(generate_sys_col_oid(), get_sys_object_id("tables"), 3, "desc_page_id", get_type_val("int"), notnull=True, defval=None),
     Column(generate_sys_col_oid(), get_sys_object_id("tables"), 4, "clustered_type", get_type_val("varchar"), notnull=True, defval=None),
 ])
 
@@ -425,28 +436,28 @@ def bootstrap_catalog_sys_tables():
             "oid": get_sys_object_id("types"),  
             "namespace": get_sys_namespace().value, 
             "name": get_sys_object_by_name("types").name, 
-            "desc_page_num": get_sys_table_desc("types"),
+            "desc_page_id": get_sys_table_desc("types"),
             "clustered_type": "heap"
         },
         {
             "oid": get_sys_object_id("objects"),  
             "namespace": get_sys_namespace().value, 
             "name": get_sys_object_by_name("objects").name, 
-            "desc_page_num": get_sys_table_desc("objects"),
+            "desc_page_id": get_sys_table_desc("objects"),
             "clustered_type": "heap"
         },
         {
             "oid": get_sys_object_id("columns"),  
             "namespace": get_sys_namespace().value, 
             "name": get_sys_object_by_name("columns").name, 
-            "desc_page_num": get_sys_table_desc("columns"),
+            "desc_page_id": get_sys_table_desc("columns"),
             "clustered_type": "heap"
         },
         {
             "oid": get_sys_object_id("tables"),  
             "namespace": get_sys_namespace().value, 
             "name": get_sys_object_by_name("tables").name, 
-            "desc_page_num": get_sys_table_desc("tables"),
+            "desc_page_id": get_sys_table_desc("tables"),
             "clustered_type": "heap"
         },
     ]
@@ -473,6 +484,10 @@ def insert_catalog_sys_columns(heap_page, schema: Schema):
     for column_tuple in tuples:
         t = StructuredTuple.load(sys_columns_schema, column_tuple)
         heap_page = insert_with_grow(global_hpalloc, heap_page, t)
+
+
+def create_table(namespace, schema):
+    insert_catalog_sys_object()
 
 def bootstrap_catalog_sys_columns(sys_obj):
     _info(f"{sys_obj} bootstrapping...")
@@ -526,7 +541,7 @@ def read_sys_table(table_name):
     table_oid = get_sys_object_id(table_name)
     schema = get_table_schema_from_cache(table_oid)
     if schema is None:
-        raise Exception(f"schema for sys table {oid} must be always cached {table_name}")
+        raise Exception(f"schema for sys table '{table_name}' must be always cached {table_name}")
     desc_page_id = get_sys_table_desc(table_name)
 
     page = ref_page(desc_page_id)
@@ -550,9 +565,43 @@ def read_sys_columns_tuples():
     types = heap_page.raw_map(lambda buffer: StructuredTuple.parse(buffer).struct(sys_columns_schema))
     return types
 
-def init_table_access(namespace, oid):
+class TableAccess:
+    def __init__(self, namespace, oid, schema, desc_pg_id, lockmode=None):
+        self.namespace = namespace
+        self.oid = oid
+        self.schema = schema
+        self.desc_pg_id = desc_pg_id
+
+def raw_get_sys_tables(oid):
+    page_heap = get_sys_table_desc("tables")
+    return page_heap.raw_get(oid)
+
+def raw_build_schema_from_sys_columns(oid):
     schema = get_table_schema_from_cache(oid)
+    if schema is not None:
+        return schema
 
-    
+    page_heap = get_sys_table_desc("columns")
 
+    columns = page_heap.raw_filter(
+        f=lambda buffer: StructuredTuple.parse(buffer).struct(sys_columns_schema),
+        raw_filter_func=lambda x: x["oid" == oid]
+    )
 
+    schema = Schema(columns)
+    cache_table_schema(oid, schema)
+    return schema
+
+def init_table_access(namespace, oid):
+
+    if is_sys_namespace(namespace):
+        schema = get_table_schema_from_cache(oid)
+        assert schema is not None
+        desc = get_sys_table_desc()
+
+    else: 
+        table_row = raw_get_sys_tables(oid)
+        desc = table_row["desc"]
+        schema = raw_build_schema_from_sys_columns(oid)
+
+    return TableAccess(namespace, oid, schema, desc_pg_id=desc)

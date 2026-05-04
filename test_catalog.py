@@ -67,15 +67,17 @@ if __name__ == '__main__':
     bootstrap_catalog_sys_types()
     tuples = read_sys_table("types")
     for t in tuples:
+        break
         print(t)
 
     bootstrap_catalog_sys_objects()
     tuples = read_sys_table("objects")
     for t in tuples:
+        break
         print(t)
 
     tuples = bootstrap_catalog_sys_tables()
-    tuples = read_sys_table("objects")
+    tuples = read_sys_table("tables")
     for t in tuples:
         print(t)
 
@@ -86,6 +88,7 @@ if __name__ == '__main__':
 
     tuples = read_sys_table("columns")
     for t in tuples:
+        break
         print(t)
 
     app.terminate()
