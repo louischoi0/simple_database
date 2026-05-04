@@ -96,7 +96,7 @@ class Object:
             return cursor.buffer
         
         cursor.write_int64_a(PRIMITIVE_VARCHAR_TYPE_FLAG)
-        cursor.write_dynamic_type_a(self.value_type)
+        cursor.write_dynamic_type_a(self.value_type.value, self.value)
 
         return cursor.buffer
     
@@ -190,13 +190,14 @@ type_char = SysObject(13, obj_sys_namespace, "type_char", type_type, value=2, va
 type_bool = SysObject(15, obj_sys_namespace, "type_bool", type_type, value=3, value_is_null=False, value_type=type_int)
 type_bytes = SysObject(16, obj_sys_namespace, "type_bytes", type_type, value=4, value_is_null=False, value_type=type_int)
 
-type_schema = SysObject(14, obj_sys_namespace, "type_schema", type_type)
-type_namespace = SysObject(17, obj_sys_namespace, "type_namespace", type_type)
-type_attrbute = SysObject(18, obj_sys_namespace, "type_attribute", type_type)
-type_column = SysObject(19, obj_sys_namespace, "type_column", type_type)
+type_schema = SysObject(14, obj_sys_namespace, "type_schema", type_type, value=5, value_is_null=False, value_type=type_int)
+type_namespace = SysObject(17, obj_sys_namespace, "type_namespace", type_type, value=6, value_is_null=False, value_type=type_int)
+type_attrbute = SysObject(18, obj_sys_namespace, "type_attribute", type_type, value=7, value_is_null=False, value_type=type_int)
+type_column = SysObject(19, obj_sys_namespace, "type_column", type_type, value=8, value_is_null=False, value_type=type_int)
 
-type_page = SysObject(10, obj_sys_namespace, "type_page", type_type, value=6, value_is_null=False, value_type=type_int)
-type_table = SysObject(11, obj_sys_namespace, "type_table", type_type, value=5, value_is_null=False, value_type=type_int)
+type_page = SysObject(20, obj_sys_namespace, "type_page", type_type, value=9, value_is_null=False, value_type=type_int)
+type_table = SysObject(21, obj_sys_namespace, "type_table", type_type, value=10, value_is_null=False, value_type=type_int)
+type_operator = SysObject(22, obj_sys_namespace, "type_operator", type_type, value=11, value_is_null=False, value_type=type_int)
 
 obj_sys_namespace.type = type_namespace
 obj_sys_namespace.value_type = type_int
@@ -205,6 +206,9 @@ TYPES = {
   "type_page": type_page,
   "type_table": type_table,
   "type_namespace": type_namespace,
+
+  "type_column": type_column,
+  "type_operator": type_operator,
 
   "type_int": type_int,
   "type_varchar": type_varchar,
@@ -485,9 +489,38 @@ def insert_catalog_sys_columns(heap_page, schema: Schema):
         t = StructuredTuple.load(sys_columns_schema, column_tuple)
         heap_page = insert_with_grow(global_hpalloc, heap_page, t)
 
+def create_table(namespace, name, schema, clustered_type="heap"):
+    object_hpage = sys_hpalloc_ref(get_sys_table_desc("objects"))
+    column_hpage = sys_hpalloc_ref(get_sys_table_desc("columns"))
+    table_hpage = sys_hpalloc_ref(get_sys_table_desc("tables"))
+    new_table_oid = generate_user_oid()
 
-def create_table(namespace, schema):
-    insert_catalog_sys_object()
+    table_hp = global_hpalloc()
+    table_hp.update_header_buffer()
+
+    object = {
+        "oid": new_table_oid,
+        "namespace": namespace.value,
+        "obj_type": get_type_val("table"),
+        "name": name,
+    }
+
+    object_tuple = StructuredTuple.load(sys_objects_schema, object)
+    object_tuple.struct(sys_objects_schema)
+    insert_catalog_sys_object(object_hpage, object_tuple)
+
+    table = {
+        "oid": get_sys_object_id("types"),  
+        "namespace": namespace.value, 
+        "name": name,
+        "desc_page_id": table_hp.id,
+        "clustered_type": clustered_type,
+    }
+    table_tuple = StructuredTuple.load(sys_tables_schema, table)
+    table_tuple.struct(sys_tables_schema)
+    insert_catalog_sys_table(table_hpage, table)
+
+    insert_catalog_sys_columns(column_hpage, schema)
 
 def bootstrap_catalog_sys_columns(sys_obj):
     _info(f"{sys_obj} bootstrapping...")
@@ -592,7 +625,7 @@ def raw_build_schema_from_sys_columns(oid):
     cache_table_schema(oid, schema)
     return schema
 
-def init_table_access(namespace, oid):
+def init_table_access(namespace, oid, lockmode=None):
 
     if is_sys_namespace(namespace):
         schema = get_table_schema_from_cache(oid)
@@ -604,4 +637,4 @@ def init_table_access(namespace, oid):
         desc = table_row["desc"]
         schema = raw_build_schema_from_sys_columns(oid)
 
-    return TableAccess(namespace, oid, schema, desc_pg_id=desc)
+    return TableAccess(namespace, oid, schema, desc_pg_id=desc, lockmode=lockmode)

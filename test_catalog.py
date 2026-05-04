@@ -1,13 +1,12 @@
 from core.catalog import Object, SysObject, get_sys_namespace, get_type, Attribute, get_sys_object_id, sys_columns_schema
 from core.catalog import bootstrap_catalog_sys_types, read_sys_types_tuples, bootstrap_catalog_sys_columns, read_sys_table, read_sys_columns_tuples
-from core.catalog import bootstrap_catalog_sys_objects, bootstrap_catalog_sys_tables
+from core.catalog import bootstrap_catalog_sys_objects, bootstrap_catalog_sys_tables, Column, get_type_val, Schema, create_table
 from core.catalog import sys_types_schema
 from core.heap import StructuredTuple, heap_page as HeapPage
 from core.blk import _init_blk_driver
 from core.dbmaster import DBMaster
 
-
-def __test_object_dec():
+def test_object_dec():
     obj = SysObject(1, get_sys_namespace(), "testObject", get_type("varchar"), value="thisisvalue", value_is_null=False, value_type=get_type("varchar"))
 
     print("obj attr: ", obj.attrs)
@@ -22,27 +21,6 @@ def __test_object_dec():
 
     obj2.display()
 
-def __test_attr_dec():
-    attr0 = Attribute(101, 99, "table_desc_page", value=123, value_is_null=False, value_type=get_type("int"))
-    buffer = attr0.ser()
-    attr2 = Object.parse(buffer)
-
-    attr2.display()
-
-def test_parse_catalog_column_schema():
-    tuple0 = {
-            "rel_id": get_sys_object_id("columns"),
-            "pos":  sys_columns_schema.get_attribute("rel_id", "pos"),
-            "name":  sys_columns_schema.get_attribute("rel_id", "name"),
-            "type_val":  sys_columns_schema.get_attribute("rel_id", "type_val"),
-            "len":  sys_columns_schema.get_attribute("rel_id", "len"),
-            "notnull":  sys_columns_schema.get_attribute("rel_id", "notnull"),
-            "defval":  sys_columns_schema.get_attribute("rel_id", "defval"),
-    }
-
-
-    StructuredTuple.load()
-
 def test_structured_tuple():
     data = {
         "oid": 1,
@@ -52,7 +30,8 @@ def test_structured_tuple():
     }
 
     structured_tuple = StructuredTuple.load(sys_types_schema, data)
-    structured_tuple2 = StructuredTuple.parse(sys_types_schema, structured_tuple.buffer)
+    structured_tuple2 = StructuredTuple.parse(structured_tuple.buffer)
+    structured_tuple2.struct(sys_types_schema)
 
     assert structured_tuple.structured_data["oid"] == structured_tuple2.structured_data["oid"]
     assert structured_tuple.structured_data["name"] == structured_tuple2.structured_data["name"]
@@ -60,20 +39,32 @@ def test_structured_tuple():
     assert structured_tuple.structured_data["len"] == structured_tuple2.structured_data["len"]
     assert len(structured_tuple.structured_data) == len(structured_tuple2.structured_data)
 
+def test_create_table():
+
+    test_table_schema = Schema([
+        Column(0, 0, 0, "student_id", get_type_val("int"), notnull=True, defval=None),
+        Column(0, 0, 1, "name", get_type_val("varchar"), notnull=True, defval=None),
+        Column(0, 0, 2, "grade", get_type_val("int"), notnull=True, defval=None),
+        #Column(0, 3, "grade2", get_type_val("int"), notnull=True, defval=None),
+    ])
+
+    create_table(get_sys_namespace(), "students", schema=test_table_schema, clustered_type="heap")
+
 if __name__ == '__main__':
     app = DBMaster(2)
     app.activate()
 
+    test_object_dec()
+    test_structured_tuple()
+
     bootstrap_catalog_sys_types()
     tuples = read_sys_table("types")
     for t in tuples:
-        break
         print(t)
 
     bootstrap_catalog_sys_objects()
     tuples = read_sys_table("objects")
     for t in tuples:
-        break
         print(t)
 
     tuples = bootstrap_catalog_sys_tables()
@@ -88,7 +79,7 @@ if __name__ == '__main__':
 
     tuples = read_sys_table("columns")
     for t in tuples:
-        break
         print(t)
 
+    test_create_table()
     app.terminate()

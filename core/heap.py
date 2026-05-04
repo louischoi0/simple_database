@@ -34,6 +34,7 @@ class StructuredTuple(HeapTuple):
     def __init__(self, buffer):
         super(StructuredTuple, self).__init__(buffer)
         self.structured_data = {}
+        self.data = []
 
     def get(self, key):
         return self.structured_data[key]
@@ -46,6 +47,7 @@ class StructuredTuple(HeapTuple):
             assert c.pos == idx
             value = cursor.read_dynamic_type_a(c.type.value)
             self.structured_data[c.name] = value
+            self.data.append(value)
 
         return self.structured_data
     
