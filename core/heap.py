@@ -178,11 +178,14 @@ class heap_page(page):
             
             cursor.at(tuple_pos)
             buffer = cursor.read(size)
+            ncursor = buffer_cursor(buffer)
+            ncursor.at(HeapTuple.HEAP_TUPLE_HEADER_SIZE)
+            _pk = ncursor.read_int64()
 
-            if cursor.read_int64() == pk:
+            if _pk == pk:
                 return buffer
 
-        return res
+        return None
     
     def raw_filter(self, f, raw_filter_func):
         cursor = self.cursor
@@ -199,6 +202,7 @@ class heap_page(page):
             cursor.at(tuple_pos)
             buffer = cursor.read(size)
             item = f(buffer)
+            print(item)
 
             if raw_filter_func(item):
                 res.append(item)

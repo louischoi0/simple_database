@@ -1,9 +1,11 @@
 from core.catalog import Column, get_type, init_table_access
 from core.heap import StructuredTuple
-from page_mgr import ref_page
+from core.page_mgr import ref_page, ref_heap_page, global_hpalloc
+from core.catalog import get_table_schema_from_cache
+from core.heap import insert_with_grow
 
 class QueryOperator:
-    def __init__(self, name, args):
+    def __init__(self, name, *args):
         self.name = name
         self.args = args
 
@@ -31,6 +33,15 @@ class QueryExecState:
     def __init__(self, table_access, *args, **kwargs):
         self.table_access = table_access
 
+class HeapPageInsertState(QueryExecState):
+    def __init__(self, table_access, tuple):
+        super(HeapPageInsertState, self).__init__(table_access)
+        self.tuple = tuple
+
+    def exec(self):
+        heap_page = ref_heap_page(self.table_access.desc_pg_id)
+        insert_with_grow(global_hpalloc, heap_page, self.tuple)
+
 class HeapPageScanState(QueryExecState):
     def __init__(self, table_access, targets=None, conditions=None):
         super(HeapPageScanState, self).__init__(table_access)
@@ -47,7 +58,7 @@ class HeapPageScanState(QueryExecState):
             self.conditions = conditions
         
         if targets is None:
-            targets = []
+            self.targets = []
         else:
             self.targets = targets
         
@@ -60,30 +71,39 @@ class HeapPageScanState(QueryExecState):
         return res 
 
     def exec(self):
-        heap_page = self.ref_page(self.table_access.desc_pg_id)
-        init = True
+        heap_page = ref_heap_page(self.table_access.desc_pg_id)
         res = []
 
-        while init or heap_page.has_next():
+        while True:
             init = False
             _res = heap_page.raw_filter(
                 f=lambda buffer: StructuredTuple.parse(buffer).struct(self.table_access.schema),
-                raw_filter_func=lambda tuple: self.eveal_conditions(tuple)
+                raw_filter_func=lambda tuple: self.eval_conditions(tuple)
             )
+
             res.extend(_res)
+
+            if heap_page.has_next():
+                heap_page = ref_heap_page(heap_page.read_next_page_pointer())
+            else:
+                break
+
         return res
     
     def add_condition(self, condition):
         self.conditions.append(condition)
+        return self
 
-def select(namespace, table_oid):
+def init_insert(namespace, table_oid, raw_data):
+    table_access = init_table_access(namespace, table_oid, lockmode=None)
+    schema = get_table_schema_from_cache(table_oid)
+    data_tuple = StructuredTuple.load(schema, raw_data)
+
+    return HeapPageInsertState(table_access=table_access, tuple=data_tuple)
+
+def init_select(namespace, table_oid):
     table_access = init_table_access(namespace, table_oid, lockmode=None)
 
     #todo match scanstate type acording to table clustered type
     return HeapPageScanState(table_access=table_access)
 
-
-class HeapPageInsertState(QueryExecState):
-    def __init__(self, table_access):
-        pass
-  

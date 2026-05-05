@@ -31,7 +31,9 @@ def test_structured_tuple():
 
     structured_tuple = StructuredTuple.load(sys_types_schema, data)
     structured_tuple2 = StructuredTuple.parse(structured_tuple.buffer)
+
     structured_tuple2.struct(sys_types_schema)
+    structured_tuple.struct(sys_types_schema)
 
     assert structured_tuple.structured_data["oid"] == structured_tuple2.structured_data["oid"]
     assert structured_tuple.structured_data["name"] == structured_tuple2.structured_data["name"]
@@ -42,17 +44,18 @@ def test_structured_tuple():
 def test_create_table():
 
     test_table_schema = Schema([
-        Column(0, 0, 0, "student_id", get_type_val("int"), notnull=True, defval=None),
-        Column(0, 0, 1, "name", get_type_val("varchar"), notnull=True, defval=None),
-        Column(0, 0, 2, "grade", get_type_val("int"), notnull=True, defval=None),
-        #Column(0, 3, "grade2", get_type_val("int"), notnull=True, defval=None),
+        Column(0, 4001, 0, "student_id", get_type_val("int"), notnull=True, defval=None),
+        Column(0, 4001, 1, "name", get_type_val("varchar"), notnull=True, defval=None),
+        Column(0, 4001, 2, "grade", get_type_val("int"), notnull=True, defval=None),
     ])
 
     create_table(get_sys_namespace(), "students", schema=test_table_schema, clustered_type="heap")
 
 if __name__ == '__main__':
     app = DBMaster(2)
+
     app.activate()
+    app.blk.init_driver()
 
     test_object_dec()
     test_structured_tuple()
@@ -82,4 +85,9 @@ if __name__ == '__main__':
         print(t)
 
     test_create_table()
+
+    tuples = read_sys_table("tables")
+    for t in tuples:
+        print(t)
+
     app.terminate()
