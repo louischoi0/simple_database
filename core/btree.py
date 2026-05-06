@@ -292,15 +292,15 @@ class bt_node:
 
         for k in self.keys:
             c.write_int64(k)
-        
+
         c.pad( (MAX_KEY_COUNT - self.key_count) * 8 )
-      
+
         for s in self.slots:
             c.write_int64(s)
 
         c.pad( (MAX_SLOT_COUNT - (self.key_count + 1)) * 8 )
         c.write_int64(self.next_page_id)
-        
+
         assert len(c.buffer) == len(self.page.buffer)
         self.page.buffer = c.buffer
 

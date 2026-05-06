@@ -82,7 +82,6 @@ def select(namespace, table_oid):
     #todo match scanstate type acording to table clustered type
     return HeapPageScanState(table_access=table_access)
 
-
 class HeapPageInsertState(QueryExecState):
     def __init__(self, table_access):
         pass

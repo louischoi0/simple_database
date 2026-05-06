@@ -50,9 +50,9 @@ def test_buffer_cursor_bytes():
 
     cursor_r.buffer = cursor_w.buffer
 
-    print(cursor_r.read_bytes())
-    print(cursor_r.read_bytes())
-    print(cursor_r.read_bytes())
+    assert cursor_r.read_bytes() == b'00000'
+    assert cursor_r.read_bytes() == b'00001'
+    assert cursor_r.read_bytes() == b'00002'
 
 if __name__ == "__main__":
     test_buffer_cursor_bytes()
