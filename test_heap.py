@@ -98,7 +98,6 @@ def test_structured_tuple(app):
 
         heap.insert(i)
 
-
     heap.delete_tuple_by_index(0) 
     read_datas = heap.raw_map(lambda buffer: StructuredTuple.parse(buffer).struct(test_table_schema))
 

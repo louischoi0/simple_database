@@ -1,5 +1,7 @@
 from core.blk import _init_blk_driver
 from core.page_mgr import _init_mgr_module, PageManager
+from core.wal import _init_wal_system
+
 import threading
 
 class DBMaster:
@@ -9,6 +11,8 @@ class DBMaster:
         self.alloc = None
         self.cache_pool = None
         self.procs = {}
+        self.wal_writer = None
+        self.wal_checkpointer = None
 
     def activate(self):
         blk = _init_blk_driver(self.driver_num)
@@ -19,15 +23,28 @@ class DBMaster:
         self.cache_pool = cache_pool
 
         self.fork_pg_mgr_proc()
+        self.fork_pg_wal_proc()
 
     def fork_pg_mgr_proc(self):
         self.pg_mgr = PageManager(self.blk, self.cache_pool)
-        import threading
         
         th = threading.Thread(target=self.pg_mgr.proc)
 
         self.procs["pg_mgr"] = th
         th.start()
+        return th
+    
+    def fork_pg_wal_proc(self):
+        self.wal_writer, self.wal_checkpointer = _init_wal_system()
+        th = threading.Thread(target=self.wal_checkpointer.proc)
+
+        self.procs["pg_checkpointer"] = th
+        th.start()
+
+        th = threading.Thread(target=self.wal_writer.proc)
+        self.procs["pg_wal"] = th
+        th.start()
+
         return th
     
     def terminate(self):

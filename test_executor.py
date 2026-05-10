@@ -1,6 +1,7 @@
 from core.executor import init_select, init_insert
 from core.dbmaster import DBMaster
 from core.catalog import get_public_namespace, Schema, Column, get_type_val
+from core.wal import _init_wal_system
 
 if __name__ == "__main__":
     app = DBMaster(2)
