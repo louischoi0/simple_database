@@ -35,6 +35,7 @@ class StructuredTuple(HeapTuple):
         super(StructuredTuple, self).__init__(buffer)
         self.structured_data = {}
         self.data = []
+        self.pk = None
 
     def get(self, key):
         return self.structured_data[key]
@@ -49,6 +50,7 @@ class StructuredTuple(HeapTuple):
             self.structured_data[c.name] = value
             self.data.append(value)
 
+        self.pk = self.data[0]
         return self.structured_data
     
     def get_null_flag_buffer(self):
@@ -73,13 +75,13 @@ class StructuredTuple(HeapTuple):
     @classmethod
     def parse(self, buffer):
         t = StructuredTuple(buffer)
-        
         cursor = buffer_cursor(buffer)
 
         t.size = cursor.read_int64()
         t.xmin = cursor.read_int64()
         t.xmax = cursor.read_int64()
         t.reserved = cursor.read_int64()
+        t.pk = cursor.read_int64()
 
         return t
     
@@ -178,11 +180,14 @@ class heap_page(page):
             
             cursor.at(tuple_pos)
             buffer = cursor.read(size)
+            ncursor = buffer_cursor(buffer)
+            ncursor.at(HeapTuple.HEAP_TUPLE_HEADER_SIZE)
+            _pk = ncursor.read_int64()
 
-            if cursor.read_int64() == pk:
+            if _pk == pk:
                 return buffer
 
-        return res
+        return None
     
     def raw_filter(self, f, raw_filter_func):
         cursor = self.cursor
@@ -199,6 +204,7 @@ class heap_page(page):
             cursor.at(tuple_pos)
             buffer = cursor.read(size)
             item = f(buffer)
+            print(item)
 
             if raw_filter_func(item):
                 res.append(item)
@@ -282,6 +288,9 @@ class heap_page(page):
      
     def capacity(self):
         return self.slot_cursor - (heap_page.SLOT_SEGMENT_OFFSET + (heap_page.SLOT_SIZE * (self.tuple_count + 1)))
+    
+    def possible(self, size):
+        return self.capacity() >= size
 
     def insert(self, t):
         with self.lock:

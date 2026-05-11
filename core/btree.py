@@ -67,7 +67,6 @@ class bt_node:
         target = self 
         tuple_key = _minkey(inode)
         cursor = bt_cursor()
-        split_node = None
 
         if _ptype(target) == PAGE_TYPE_ROOT:
             cursor.visit(target)
@@ -91,14 +90,29 @@ class bt_node:
             else:
                 return vnode.split(inode), cursor, -1
 
-        return None, cursor, -1
-    
-
     def update_min_key_upper_nodes(self, min_key, cursor):
         node = cursor.pop_try()
         while node is not None:
             node.set_min_key(min_key)
             node = cursor.pop_try()
+    
+    def validate(self):
+        self.update_header_buffer()
+        assert is_btree_page(self)
+
+        id, type, r_min_key, level, key_count, keys, slots, next_page_id = bt_node.parse_header_buffer(_buffer(self))
+        assert self.page.type == type
+
+        assert id == self.page.id
+        assert type == self.page.type
+        assert r_min_key == self.page.min_key
+        assert self.slots == slots
+        assert self.key_count == key_count
+        assert self.next_page_id == next_page_id
+        assert self.keys == sorted(self.keys)
+        assert keys == sorted(keys)
+        assert keys == self.keys
+        assert self.level == level
 
     def insert(self, inode):
         assert _ptype(self) == PAGE_TYPE_ROOT
@@ -159,7 +173,7 @@ class bt_node:
         if _ptype(self) == PAGE_TYPE_ROOT:
             self.set_page_type(PAGE_TYPE_INTERNAL)
 
-        index = self.find_leaf_index_to_insert(_minkey(new_node))
+        index = self.find_leaf_index_to_insert_page(_minkey(new_node))
 
         nslots = self.slots.copy()
         nslots.insert(index, _id(new_node))
@@ -202,6 +216,9 @@ class bt_node:
     def set_min_key(self, min_key):
         self.page.min_key = min_key
     
+    def activate(self):
+        pass
+    
     def direct_insert(self, inode):
         assert len(self.slots) < MAX_SLOT_COUNT
         assert len(self.slots) == len(self.keys) + 1
@@ -209,7 +226,7 @@ class bt_node:
         if _ptype(inode) == PAGE_TYPE_HEAP:
             assert _ptype(self) == PAGE_TYPE_DATA
 
-        index = self.find_leaf_index_to_insert(_minkey(inode))
+        index = self.find_leaf_index_to_insert_page(_minkey(inode))
 
         if _minkey(inode) < self.page.min_key:
             assert index == 0
@@ -251,7 +268,7 @@ class bt_node:
                 return self.slots[i]
         return self.slots[-1]
 
-    def find_leaf_index_to_insert(self, tuple_key):
+    def find_leaf_index_to_insert_page(self, tuple_key):
         idx = 0
 
         _info(f"direct insert: {tuple_key} to {_id(self)},")

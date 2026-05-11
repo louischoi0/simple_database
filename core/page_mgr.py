@@ -1,7 +1,8 @@
 from core.page import page
-from core.heap import heap_page
 from utils.logging import info
 from core.helper import _minkey
+from core.const import *
+from core.heap import heap_page
 import threading
 
 global alloc
@@ -37,6 +38,20 @@ def ref_page(id):
         cache_pool.cache(page)
         return page
 
+def ref_heap_page(id):
+    page = ref_page(id)
+    page = page.as_heap()
+    page.activate()
+    return page
+
+def ref_btree_page(id):
+    from core.btree import bt_node
+    page = ref_page(id)
+    vnode = bt_node.as_btnode(page)
+    vnode.activate()
+    vnode.validate()
+    return vnode
+
 def global_write_page(pg):
     global alloc
     return alloc.blkdev.write_page(pg)
@@ -52,6 +67,9 @@ class page_allocator:
         self.cache_pool = page_cache_pool(blkdev)
     
     def sys_hpalloc_ref(self, page_id):
+        if page_id > PAGE_MAX_SYS_ID:
+            raise Exception("sys page allocated only 200 pages")
+
         if self.cache_pool.exists(page_id):
             return self.cache_pool.get(page_id)
 
@@ -60,6 +78,9 @@ class page_allocator:
         return pg
 
     def sys_hpalloc(self, page_id):
+        if page_id > PAGE_MAX_SYS_ID:
+            raise Exception("sys page allocated only 200 pages")
+
         if self.cache_pool.exists(page_id):
             raise Exception(f"sys heap page:{page_id} already allocated")
         
@@ -69,14 +90,21 @@ class page_allocator:
         
     def palloc(self):
         new_page_id = self.metablock.inc() - 1
+
+        if new_page_id < PAGE_MAX_SYS_ID:
+            raise Exception("palloc tried to sys pages. not allowed")
+
         _info("page alloc: %d" % new_page_id)
         pg = page(new_page_id, -1, -1)
         self.cache_pool.cache(pg)
         return pg
 
     def hpalloc(self):
+
         new_page_id = self.metablock.inc() - 1
-        print("new page id: ", new_page_id)
+        if new_page_id < PAGE_MAX_SYS_ID:
+            raise Exception(f"hpalloc tried to sys page numbered {new_page_id}. not allowed")
+
         _info("heap page alloc: %d" % new_page_id)
         pg = heap_page(new_page_id)
         self.cache_pool.cache(pg)

@@ -8,7 +8,7 @@ from core.const import *
 from core.btree import bt_node
 from core.heap import heap_page, HeapTuple, StructuredTuple
 from core.helper import _buffer, _id, _ptype, _minkey
-from core.catalog import Schema, Column, get_type
+from core.catalog import Schema, Column, get_type, get_type_val
 from utils.logging import info, set_log_disable 
 from core.dbmaster import DBMaster
 
@@ -16,7 +16,7 @@ app = None
 _info = lambda x: info("app", x)
 
 simple_schema = Schema([
-    Column(0, 0, "id", get_type("int"), notnull=True, default_val=None),
+    Column(0, 0, "id", get_type("int"), notnull=True, defval=None, type_val=get_type_val("int")),
 ])
 
 blk = None
@@ -211,7 +211,7 @@ def exec_command(cmd, app):
         _info("iter page %d (%d k)" % (hpage.id, hpage.tuple_count))
         hpage.iter(print)
         blk.commit_metablock(app.alloc.metablock)
-    
+   
     else: 
         raise Exception("unknown command type: ", ctype)
 

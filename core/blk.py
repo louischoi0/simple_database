@@ -43,12 +43,14 @@ class blk_driver:
     def init_driver(self):
         self.f.seek(0)
         self.f.write(bytearray(b'\x00' * (MAX_PAGE_COUNT * PAGE_SIZE + META_SIZE)))
-        self.commit_metablock(metablock(0))
+        self.commit_metablock(metablock(PAGE_MAX_SYS_ID))
     
     def read_metablock(self):
         self.f.seek(0)
         meta_buffer = self.f.read(8)
-        return metablock(toint64(meta_buffer[:8]))          
+        value = toint64(meta_buffer[:8])
+        
+        return metablock(value)
 
     def commit_metablock(self, metablock):
         self.f.seek(0)

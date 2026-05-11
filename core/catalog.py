@@ -1,5 +1,5 @@
 from utils.buffer_cursor import buffer_cursor
-from core.page_mgr import sys_hpalloc_ref, ref_page, global_hpalloc
+from core.page_mgr import sys_hpalloc_ref, ref_page, global_hpalloc, ref_heap_page
 from core.const import *
 from core.heap import StructuredTuple, insert_with_grow
 from utils.logging import info
@@ -170,6 +170,7 @@ class SysAttribute(Attribute):
 
 
 obj_sys_namespace = SysObject(0, None, "namespaceSys", None, value=0, value_is_null=False)
+obj_public_namespace = SysObject(1, None, "namespacePublic", None, value=1, value_is_null=False)
 
 def get_sys_namespace():
     return obj_sys_namespace
@@ -177,7 +178,10 @@ def get_sys_namespace():
 def is_sys_namespace(namespace):
     return obj_sys_namespace.oid == namespace.oid
 
-type_type = Object(1, None, "typeType", None)
+def get_public_namespace():
+    return obj_public_namespace
+
+type_type = Object(2, None, "typeType", None)
 type_type.namespace = get_sys_namespace()
 type_type.type = type_type
 
@@ -201,6 +205,9 @@ type_operator = SysObject(22, obj_sys_namespace, "type_operator", type_type, val
 
 obj_sys_namespace.type = type_namespace
 obj_sys_namespace.value_type = type_int
+
+obj_public_namespace.type = type_namespace
+obj_public_namespace.value_type = type_int
 
 TYPES = {
   "type_page": type_page,
@@ -288,14 +295,14 @@ def get_sys_table_desc(name: str) -> int:
     return SYS_TABLE_DESC_MAP[name]
 
 class Column(Object):
-    def __init__(self, oid, rel_id, pos, name, type_val, notnull=True, defval=None):
+    def __init__(self, oid, rel_id, pos, name, type_val, notnull=True, defval=None, len=None):
         self.oid = oid
         self.rel_id = rel_id
         self.pos = pos
         self.name = name
         self.type_val = type_val
         self.type = get_type_by_val(type_val)
-        self.len = get_type_len_by_val(type_val)
+        self.len = get_type_len_by_val(type_val) if len is None else len
         self.notnull = notnull
         self.defval = defval
 
@@ -493,6 +500,7 @@ def create_table(namespace, name, schema, clustered_type="heap"):
     object_hpage = sys_hpalloc_ref(get_sys_table_desc("objects"))
     column_hpage = sys_hpalloc_ref(get_sys_table_desc("columns"))
     table_hpage = sys_hpalloc_ref(get_sys_table_desc("tables"))
+
     new_table_oid = generate_user_oid()
 
     table_hp = global_hpalloc()
@@ -510,7 +518,7 @@ def create_table(namespace, name, schema, clustered_type="heap"):
     insert_catalog_sys_object(object_hpage, object_tuple)
 
     table = {
-        "oid": get_sys_object_id("types"),  
+        "oid": new_table_oid,
         "namespace": namespace.value, 
         "name": name,
         "desc_page_id": table_hp.id,
@@ -518,7 +526,7 @@ def create_table(namespace, name, schema, clustered_type="heap"):
     }
     table_tuple = StructuredTuple.load(sys_tables_schema, table)
     table_tuple.struct(sys_tables_schema)
-    insert_catalog_sys_table(table_hpage, table)
+    insert_catalog_sys_table(table_hpage, table_tuple)
 
     insert_catalog_sys_columns(column_hpage, schema)
 
@@ -599,29 +607,36 @@ def read_sys_columns_tuples():
     return types
 
 class TableAccess:
-    def __init__(self, namespace, oid, schema, desc_pg_id, lockmode=None):
+    def __init__(self, namespace, oid, schema, desc_pg_id, clustered_type, lockmode=None):
         self.namespace = namespace
         self.oid = oid
         self.schema = schema
         self.desc_pg_id = desc_pg_id
+        self.clustered_type = clustered_type
 
 def raw_get_sys_tables(oid):
-    page_heap = get_sys_table_desc("tables")
-    return page_heap.raw_get(oid)
+    page_heap = ref_heap_page(get_sys_table_desc("tables"))
+    buffer = page_heap.raw_get(oid)
+
+    if buffer is None:
+        raise Exception(f"table row for oid:{oid} does not exists in sys.tables")
+    
+    return StructuredTuple.parse(buffer).struct(sys_tables_schema)
 
 def raw_build_schema_from_sys_columns(oid):
     schema = get_table_schema_from_cache(oid)
     if schema is not None:
         return schema
 
-    page_heap = get_sys_table_desc("columns")
+    table_desc_id = get_sys_table_desc("columns")
+    page_heap = ref_heap_page(table_desc_id)
 
     columns = page_heap.raw_filter(
         f=lambda buffer: StructuredTuple.parse(buffer).struct(sys_columns_schema),
-        raw_filter_func=lambda x: x["oid" == oid]
+        raw_filter_func=lambda x: x["rel_id"] == oid
     )
 
-    schema = Schema(columns)
+    schema = Schema([ Column(**x) for x in columns ])
     cache_table_schema(oid, schema)
     return schema
 
@@ -634,7 +649,14 @@ def init_table_access(namespace, oid, lockmode=None):
 
     else: 
         table_row = raw_get_sys_tables(oid)
-        desc = table_row["desc"]
+        desc = table_row["desc_page_id"]
+        clustered_type = table_row["clustered_type"]
         schema = raw_build_schema_from_sys_columns(oid)
 
-    return TableAccess(namespace, oid, schema, desc_pg_id=desc, lockmode=lockmode)
+    return TableAccess(namespace, oid, schema, desc_pg_id=desc, clustered_type=clustered_type, lockmode=lockmode)
+
+def is_table_clustered_heap(table_access):
+    return table_access["clustered_type"] == "heap"
+
+def is_table_clustered_btree(table_access):
+    return table_access["clustered_type"] == "btree"
