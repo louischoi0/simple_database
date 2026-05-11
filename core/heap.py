@@ -7,10 +7,6 @@ from utils.logging import info
 XFLAG_SIZE = 8
 _info = lambda msg: info("heap", msg)
 
-class TupleVersion:
-    def __init__(self, xmin, xmax):
-        self.xmin = xmin
-        self.xmax = xmax
 
 class HeapTuple:
     HEAP_TUPLE_HEADER_SIZE = 32 # size, xmin, xmax, reserved (null bit mask for structured heap tuple)
@@ -20,8 +16,7 @@ class HeapTuple:
         self.buffer: bytearray = buffer
         cursor = buffer_cursor(buffer)
         self.size = cursor.read_int64()
-        xmin, xmax = cursor.read_int64(), cursor.read_int64()
-        self.version = TupleVersion(xmin, xmax)
+        self.xmin, self.xmax = cursor.read_int64(), cursor.read_int64()
     
     def ser(self):
         return self.buffer
@@ -108,8 +103,8 @@ class StructuredTuple(HeapTuple):
         if version is None:
             cursor.pad(XFLAG_SIZE * 2)
         else:
-            cursor.write_int64(version.xmin)
-            cursor.write_int64(version.xmax)
+            cursor.write_int64(version[0])
+            cursor.write_int64(version[1])
         
         return StructuredTuple.parse(cursor.buffer)
 
@@ -292,7 +287,10 @@ class heap_page(page):
     def possible(self, size):
         return self.capacity() >= size
 
-    def insert(self, t):
+    def insert(self, t, ctx=None):
+        if ctx is not None:
+            t.xmin = ctx.xid
+
         with self.lock:
             assert self.id != NULL_PAGE
 

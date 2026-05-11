@@ -1,6 +1,7 @@
-from core.executor import init_select, init_insert
+from core.executor import init_select, init_insert, QueryExecutionCtx
 from core.dbmaster import DBMaster
 from core.catalog import get_public_namespace, Schema, Column, get_type_val
+from core.wal import _init_wal_system
 
 if __name__ == "__main__":
     app = DBMaster(2)
@@ -14,11 +15,11 @@ if __name__ == "__main__":
 
     d0 = { "student_id": 0, "name": "louis", "grade": 3}
 
+    ctx = QueryExecutionCtx(1, app.alloc, app.wal_writer)
     insert_query_state = init_insert(get_public_namespace(), 4001, d0)
-    insert_query_state.exec()
+    insert_query_state.exec(ctx)
 
-    query_state = init_select(get_public_namespace(), 4001)
-
-    print(query_state.exec())
+    #query_state = init_select(get_public_namespace(), 4001)
+    #print(query_state.exec())
 
     app.terminate()

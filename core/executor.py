@@ -1,10 +1,12 @@
 from core.catalog import Column, get_type, init_table_access
 from core.heap import StructuredTuple
-from core.page_mgr import ref_page, ref_heap_page, global_hpalloc, ref_btree_page
+from core.page_mgr import ref_heap_page, ref_btree_page, global_hpalloc, page_allocator
 from core.catalog import get_table_schema_from_cache, is_table_clustered_heap, is_table_clustered_btree
+from core.wal import XLogWriter
 from core.heap import insert_with_grow
 from core.helper import _ptype
-from const import *
+from core.const import *
+from dataclasses import dataclass
 
 class QueryOperator:
     def __init__(self, name, *args):
@@ -35,25 +37,31 @@ class QueryExecState:
     def __init__(self, table_access, *args, **kwargs):
         self.table_access = table_access
 
+
+@dataclass
+class QueryExecutionCtx:
+    xid: int
+    allocator: page_allocator
+    wal_writer: XLogWriter
+
 class HeapPageInsertState(QueryExecState):
-    def __init__(self, table_access, tuple):
+    def __init__(self, ctx: QueryExecutionCtx, table_access, tuple):
         super(HeapPageInsertState, self).__init__(table_access)
         self.tuple = tuple
 
-    def exec(self):
+    def exec(self, ctx: QueryExecutionCtx):
         assert is_table_clustered_heap(self.table_access)
 
         heap_page = ref_heap_page(self.table_access.desc_pg_id)
         insert_with_grow(global_hpalloc, heap_page, self.tuple)
         return 1
-        
 
 class BtreePageInsertState(QueryExecState):
     def __init__(self, table_access, tuple):
         super(BtreePageInsertState, self).__init__(table_access)
         self.tuple = tuple
 
-    def exec(self):
+    def exec(self, ctx: QueryExecutionCtx):
         assert is_table_clustered_btree(self.table_access)
 
         btree_root_page = ref_btree_page(self.table_access.desc_pg_id)
@@ -65,7 +73,7 @@ class BtreePageInsertState(QueryExecState):
 
         if target_page_index == target_page.key_count + 1 or target_page_index == 0:
             new_heap_page = global_hpalloc()
-            new_heap_page.insert(self.tuple)
+            new_heap_page.insert(self.tuple, ctx=ctx)
             new_heap_page.mark_min_key(self.tuple.pk)
             return target_page.insert(new_heap_page)
 
@@ -132,7 +140,10 @@ def init_insert(namespace, table_oid, raw_data):
     schema = get_table_schema_from_cache(table_oid)
     data_tuple = StructuredTuple.load(schema, raw_data)
 
-    return HeapPageInsertState(table_access=table_access, tuple=data_tuple)
+    if table_access.clustered_type == "heap":
+        return HeapPageInsertState(table_access=table_access, tuple=data_tuple)
+    elif table_access.clustered_type == "btree":
+        return BtreePageInsertState(table_access=table_access, tuple=data_tuple)
 
 def init_select(namespace, table_oid):
     table_access = init_table_access(namespace, table_oid, lockmode=None)
