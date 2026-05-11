@@ -31,7 +31,6 @@ def test3(app):
 
     tuple = StructuredTuple.load(test_table_schema, data_template)
     cmd = create_xlog_heap_insert_cmd(xid=7, rel_id=17, page_id=0, slot_index=0, tuple=tuple)
-
     app.wal_writer.write_xlog(cmd)
 
 if __name__ == "__main__":

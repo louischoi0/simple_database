@@ -2,7 +2,7 @@ import sys
 import threading
 
 from core.blk import _init_blk_driver
-from core.page_mgr import page_allocator, _init_mgr_module, PageManager
+from core.page_mgr import page_allocator, _init_mgr_module
 from core.page import get_page_name, is_btree_page, is_heap_page
 from core.const import *
 from core.btree import bt_node
@@ -233,7 +233,6 @@ if __name__ == "__main__":
         exit(0)
 
     exec_command(sys.argv[1:], app)
-    app.cache_pool.commit_all_pages()
 
     if sys.argv[1] != "init":
         app.blk.commit_metablock(app.alloc.metablock)

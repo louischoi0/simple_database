@@ -38,7 +38,8 @@ class HeapPageInsertState(QueryExecState):
         super(HeapPageInsertState, self).__init__(table_access)
         self.tuple = tuple
 
-    def exec(self):
+    def exec(self, wal_writer):
+
         heap_page = ref_heap_page(self.table_access.desc_pg_id)
         insert_with_grow(global_hpalloc, heap_page, self.tuple)
 

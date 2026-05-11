@@ -34,6 +34,8 @@ WAL_BUFFER_OFFSET_LOCK = threading.Lock()
 WAL_SEGMENT_LOCK = threading.Lock()
 CURRENT_SEGMENT_FILE = "walseg00000000"
 
+WAL_CHECKPOINTER_LOCK = threading.Lock()
+
 class XLogWriter:
     WAL_SEGMENT_HDR_SIZE = 128
 
@@ -119,7 +121,7 @@ class XLogWriter:
             with buffer_cursor.from_file(self.current_segment_file, WAL_SEGMENT_SIZE) as cursor:
                 buffer = xlog.ser()
                 cursor.write_raw(buffer)
-                _info(f"xlog walwriter pop xlog, cmd={xlog.cmd}; lsn={xlog.lsn}; length={len(buffer)}")
+                _info(f"xlog walwriter pop xlog, cmd={xlog.cmd}; page={xlog.payload.page_id} lsn={xlog.lsn}; length={len(buffer)}")
 
     def proc(self):
         _info(f"xlog checkpointer process started")
@@ -130,24 +132,43 @@ class XLogWriter:
 
 class XLogCheckpointer:
 
-    def __init__(self):
-        self.checkpoint_lsn = 0
+    def __init__(self, blk):
+        self.checkpoint_start_lsn = 0
+        self.checkpoint_end_lsn = 0
         self.current_segment_file = CURRENT_SEGMENT_FILE
+        self.blk = blk
 
     def iter_xlog(self):
         with WAL_SEGMENT_LOCK:
             with buffer_cursor.from_file(self.current_segment_file, WAL_SEGMENT_SIZE) as cursor:
                 xlog_buffer = cursor.read_bytes()
-                if len(xlog_buffer) == 0:
+                if xlog_buffer is None or len(xlog_buffer) == 0:
                     return
                 xlog = XLog.decode(xlog_buffer)
+
+                self.checkpoint_start_lsn = xlog.lsn
+                self.do_xlog(xlog)
+                self.checkpoint_end_lsn = xlog.lsn
+
+    def commit_page(self, pg):
+        assert pg.dirty
+        self.blk.write_page(pg)
+        pg.clear_dirty_flag()
+    
+    def do_xlog(self, xlog):
+        if xlog.cmd == "hinsertx":
+            from core.page_mgr import ref_heap_page
+            page = ref_heap_page(xlog.payload.page_id)
+            self.commit_page(page)
 
     def proc(self):
         while True:
             self.iter_xlog()
             from time import sleep
             sleep(1)
-    
+
+    def wait_to_terminate(self):
+        pass
 
 class XLog:
     def __init__(self, xid, cmd, payload, lsn=None, prev_lsn=None):
@@ -204,19 +225,17 @@ class XLog:
         else:
             raise Exception(f"unknown xlog cmd type: {cmd}")
 
-def create_xlog_heap_insert_cmd(xid, rel_id, page_id, slot_index, tuple):
-    return XLogHeapInsertCMD(xid, XLogHeapInsertPayload(rel_id, page_id, slot_index, tuple.ser()))
+def create_xlog_heap_insert_cmd(xid, page_id, slot_index, tuple):
+    return XLogHeapInsertCMD(xid, XLogHeapInsertPayload(page_id, slot_index, tuple.ser()))
 
 class XLogHeapInsertPayload:
-    def __init__(self, rel_id, page_id, slot_index, tuple_buffer):
-        self.rel_id = rel_id
+    def __init__(self, page_id, slot_index, tuple_buffer):
         self.page_id = page_id
         self.slot_index = slot_index
         self.tuple_buffer = tuple_buffer
     
     def ser(self):
         cursor = buffer_cursor()
-        cursor.write_int64_a(self.rel_id)
         cursor.write_int64_a(self.page_id)
         cursor.write_int64_a(self.slot_index)
         cursor.write_bytes_a(self.tuple_buffer)
@@ -226,22 +245,26 @@ class XLogHeapInsertPayload:
     def decode(cls, buffer):
         cursor = buffer_cursor(buffer)
 
-        rel_id = cursor.read_int64()
         page_id = cursor.read_int64()
         slot_index = cursor.read_int64()
         buffer = cursor.read_bytes()
 
-        return XLogHeapInsertPayload(rel_id, page_id, slot_index, buffer)
+        return XLogHeapInsertPayload(page_id, slot_index, buffer)
+
 
 class XLogHeapInsertCMD(XLog):
     def __init__(self, xid, payload):
         super(XLogHeapInsertCMD, self).__init__(xid, "hinsertx", payload)
 
-def _init_wal_system():
+def _init_wal_system(blk):
     global g_xlog_writer
     g_xlog_writer = XLogWriter()
 
     global g_xlog_checkpointer
-    g_xlog_checkpointer = XLogCheckpointer()
+    g_xlog_checkpointer = XLogCheckpointer(blk)
 
     return g_xlog_writer, g_xlog_checkpointer
+
+def global_write_xlog(xlog):
+    global g_xlog_writer
+    return g_xlog_writer.write_xlog(xlog)
