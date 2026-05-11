@@ -26,6 +26,11 @@ class Transaction:
         self.ref_pages = []
         self.begin_lsn = 0
         self.last_lsn = 0
+        self.xlogs = []
 
     def set_xid(self, xid):
         self.xid = xid
+
+
+
+

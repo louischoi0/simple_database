@@ -100,10 +100,13 @@ class page_allocator:
         return pg
 
     def hpalloc(self):
-
         new_page_id = self.metablock.inc() - 1
         if new_page_id < PAGE_MAX_SYS_ID:
+<<<<<<< HEAD
             raise Exception(f"hpalloc tried to sys page numbered {new_page_id}. not allowed")
+=======
+            raise Exception(f"hpalloc tried to sys page:{new_page_id}. not allowed")
+>>>>>>> 18f8bc6ed3e273efc781dabf643c18f588d3cadb
 
         _info("heap page alloc: %d" % new_page_id)
         pg = heap_page(new_page_id)
@@ -123,50 +126,10 @@ class page_cache_pool:
             raise Exception("try to cache Null page")
         _info(f"cache page {pg.id}")
         self.pool[pg.id] = pg
-
-    def commit_all_pages(self):
-        for id in self.pool:
-            page = self.pool[id]
-            self.blkdev.write_page(page)
         
     def get(self, id):
         return self.pool[id]
-
-class PageManager:
-    def __init__(self, blk, cache_pool):
-        self.blk = blk
-        self.cache_pool = cache_pool
-        self.lock = threading.Lock()
-        self.exit_signal = False
     
-    def proc(self):
-        _info("start page manager process")
-        while True:
-            if self.exit_signal:
-                _info("exit signal received, terminate page manager process.")
-                break
-
-            self.lock.acquire()
-            self.commit_dirty_pages()
-            self.lock.release()
-
-            from time import sleep
-            sleep(0.5)
-    
-    def wait_to_terminate(self):
-        self.lock.acquire()
-        self.commit_dirty_pages()
-        self.exit_signal = True
-
-    def commit_dirty_pages(self):
-        for pgid in self.cache_pool.pool:
-            pg = self.cache_pool.pool[pgid]
-            pg.acquire_lock()
-            if pg.dirty:
-                self.blk.write_page(pg)
-                pg.clear_dirty_flag()
-            pg.release_lock()
-
 def _init_mgr_module(blkdev):
     global alloc
     global cache_pool

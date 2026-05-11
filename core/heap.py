@@ -159,6 +159,7 @@ class heap_page(page):
         self.cursor.write_int32(self.slot_cursor)
 
         self.slots.append(self.slot_cursor)
+        return len(self.slots) - 1
     
     def raw_get(self, pk):
         cursor = self.cursor
@@ -284,12 +285,19 @@ class heap_page(page):
     def capacity(self):
         return self.slot_cursor - (heap_page.SLOT_SEGMENT_OFFSET + (heap_page.SLOT_SIZE * (self.tuple_count + 1)))
     
+<<<<<<< HEAD
     def possible(self, size):
         return self.capacity() >= size
 
     def insert(self, t, ctx=None):
         if ctx is not None:
             t.xmin = ctx.xid
+=======
+    def before_write_data(self, slot_index, tuple_data, xid=99):
+        from core.wal import global_write_xlog, create_xlog_heap_insert_cmd
+        xlog = create_xlog_heap_insert_cmd(xid, self.id, slot_index, tuple_data)
+        global_write_xlog(xlog)
+>>>>>>> 18f8bc6ed3e273efc781dabf643c18f588d3cadb
 
         with self.lock:
             assert self.id != NULL_PAGE
@@ -300,12 +308,15 @@ class heap_page(page):
             if t.size > self.capacity():
                 return 0
 
+            slot_index = len(self.slots)
+            self.before_write_data(slot_index, t)
+
             self.write_tuple_count()
             self.add_slot(t.size)
             self.write_tuple_data(t.size, data_buffer)
 
             self.update_header_buffer()
-            return 1
+            return slot_index
     
     def ptype(self):
         return "heap"
@@ -389,11 +400,15 @@ def insert_with_grow(alloc_func, heap_page_to_insert, t):
     
     if t.size > heap_page_to_insert.capacity():
         new_page = grow(alloc_func, heap_page_to_insert, t)
+
+
+
         heap_page_to_insert.release_lock()
         return new_page
     else:
         heap_page_to_insert.release_lock()
         heap_page_to_insert.insert(t)
+
         return heap_page_to_insert
 
 
