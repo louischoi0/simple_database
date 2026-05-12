@@ -43,8 +43,6 @@ def get_sys_object_id(name):
 def get_sys_object_namespace(oid):
     return get_sys_object(oid).namespace
 
-CATALOG_PAGE_ID__SYS_TABLE_TYPES_DESC = 0
-CATALOG_PAGE_ID__SYS_TABLE_TABLES_TABLE_DESC = 1
 
 def type_equal(type, type_name):
     return get_type(type_name).oid == type.oid

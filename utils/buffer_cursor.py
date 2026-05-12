@@ -297,6 +297,15 @@ class buffer_cursor:
         self.c += length
         return value
 
+    def read_raw(self):
+        length = self.read_int64()
+        if length == 0:
+            return None, None
+        self.check(length)
+        value = self._backend[self.c - 8 : self.c - 8 + length]
+        self.c += length - 8
+        return value, length
+
     def read_varchar(self):
         length = self.read_int64()
         buf = self._backend[self.c : self.c + length]

@@ -2,6 +2,7 @@ from core.blk import _init_blk_driver
 from core.page_mgr import _init_mgr_module
 from core.wal import _init_wal_system
 from core.lock import _init_lock_system
+from core.meta import _init_meta_system
 
 import threading
 
@@ -9,6 +10,7 @@ class DBMaster:
     def __init__(self, driver_num=0):
         self.driver_num = driver_num 
         self.blk = None
+        self.meta = None
         self.alloc = None
         self.cache_pool = None
         self.procs = {}
@@ -17,17 +19,19 @@ class DBMaster:
 
     def activate(self):
         blk = _init_blk_driver(self.driver_num)
+        self.meta = _init_meta_system(blk)
+
         alloc, cache_pool = _init_mgr_module(blk)
         _init_lock_system()
 
         self.blk = blk
         self.alloc = alloc
         self.cache_pool = cache_pool
+        self.wal_writer, self.wal_checkpointer = _init_wal_system(self.blk, self.meta)
 
         self.fork_pg_wal_proc()
     
     def fork_pg_wal_proc(self):
-        self.wal_writer, self.wal_checkpointer = _init_wal_system(self.blk)
         th = threading.Thread(target=self.wal_checkpointer.proc)
 
         self.procs["pg_checkpointer"] = th
@@ -41,3 +45,4 @@ class DBMaster:
     
     def terminate(self):
         self.wal_checkpointer.wait_to_terminate()
+        exit(0)

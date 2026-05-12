@@ -11,6 +11,8 @@ _info = lambda x: info("blk", x)
 
 class blk_driver:
     def __init__(self, dev_id):
+        assert blk is None
+
         self.id = dev_id
         self.f = open(f"file__{dev_id}", "r+b")
        
@@ -27,36 +29,24 @@ class blk_driver:
         self.f.seek(offset)
         self.f.write(_buffer(page))
 
-        _info(f"writepage: id={_id(page)}, type={page.ptype()} from={offset}, len={blen}")
-    
+        _info(f"writepage {self.id}: id={_id(page)}, type={page.ptype()} from={offset}, len={blen}, checksum={page.checksum()}")
+
     def read_page_buffer(self, id):
         self.f.seek((id * PAGE_SIZE) + META_SIZE)
-        _info(f"read page {id}: from={id*PAGE_SIZE + META_SIZE}, len={PAGE_SIZE}")
+        _info(f"read page {self.id}: id={id}, from={id*PAGE_SIZE + META_SIZE}, len={PAGE_SIZE} ")
         return bytearray(self.f.read(PAGE_SIZE))
     
     def read_page(self, id):
         buffer = self.read_page_buffer(id)
         p = page(*page.parse_header_buffer(buffer))
         p.buffer = buffer
+        _info(f"page {id} checksum: {p.checksum()}")
         return p
     
     def init_driver(self):
         self.f.seek(0)
         self.f.write(bytearray(b'\x00' * (MAX_PAGE_COUNT * PAGE_SIZE + META_SIZE)))
-        self.commit_metablock(metablock(PAGE_MAX_SYS_ID))
     
-    def read_metablock(self):
-        self.f.seek(0)
-        meta_buffer = self.f.read(8)
-        value = toint64(meta_buffer[:8])
-        
-        return metablock(value)
-
-    def commit_metablock(self, metablock):
-        self.f.seek(0)
-        _info(f"commit: {metablock.max_page}")
-        self.f.write(serint64(metablock.max_page))          
-
 def _init_blk_driver(dev_id):
     global blk
     blk = blk_driver(dev_id)

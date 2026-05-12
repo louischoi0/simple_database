@@ -1,6 +1,7 @@
 from core.page import page
 from utils.logging import info
 from core.helper import _minkey
+from core.meta import  get_metablock
 from core.const import *
 from core.heap import heap_page
 import threading
@@ -21,19 +22,25 @@ def global_hpalloc():
     return alloc.hpalloc()
 
 def sys_hpalloc(sys_page_id):
+    assert sys_page_id != 0
     global alloc
     return alloc.sys_hpalloc(sys_page_id)
 
 def sys_hpalloc_ref(sys_page_id):
+    assert sys_page_id != 0
     global alloc
     return alloc.sys_hpalloc_ref(sys_page_id)
 
 def ref_page(id):
     global cache_pool
+    assert id != 0
     
     try:
-        return cache_pool.pool[id]
+        _info(f"ref_page read from cache: {id}")
+        pg = cache_pool.pool[id]
+        return pg
     except KeyError:
+        _info(f"ref_page cache miss: {id}, read from blk driver")
         page = cache_pool.blkdev.read_page(id)
         cache_pool.cache(page)
         return page
@@ -63,7 +70,7 @@ def ref_minkey(id):
 class page_allocator:
     def __init__(self, blkdev):
         self.blkdev = blkdev
-        self.metablock = blkdev.read_metablock()
+        self.metablock = get_metablock()
         self.cache_pool = page_cache_pool(blkdev)
     
     def sys_hpalloc_ref(self, page_id):
@@ -78,6 +85,7 @@ class page_allocator:
         return pg
 
     def sys_hpalloc(self, page_id):
+        assert page_id != 0
         if page_id > PAGE_MAX_SYS_ID:
             raise Exception("sys page allocated only 200 pages")
 
@@ -101,16 +109,14 @@ class page_allocator:
 
     def hpalloc(self):
         new_page_id = self.metablock.inc() - 1
+
         if new_page_id < PAGE_MAX_SYS_ID:
-<<<<<<< HEAD
-            raise Exception(f"hpalloc tried to sys page numbered {new_page_id}. not allowed")
-=======
             raise Exception(f"hpalloc tried to sys page:{new_page_id}. not allowed")
->>>>>>> 18f8bc6ed3e273efc781dabf643c18f588d3cadb
 
         _info("heap page alloc: %d" % new_page_id)
         pg = heap_page(new_page_id)
         self.cache_pool.cache(pg)
+
         return pg
 
 class page_cache_pool:

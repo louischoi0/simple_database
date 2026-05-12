@@ -56,7 +56,7 @@ class Lock:
                 return res
             else:
                 from time import sleep
-                sleep(0.1)
+                sleep(0.05)
 
     def release(self):
         with MEM_POOL_LOCK:    

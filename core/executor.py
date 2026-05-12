@@ -49,12 +49,8 @@ class HeapPageInsertState(QueryExecState):
         super(HeapPageInsertState, self).__init__(table_access)
         self.tuple = tuple
 
-<<<<<<< HEAD
     def exec(self, ctx: QueryExecutionCtx):
         assert is_table_clustered_heap(self.table_access)
-=======
-    def exec(self, wal_writer):
->>>>>>> 18f8bc6ed3e273efc781dabf643c18f588d3cadb
 
         heap_page = ref_heap_page(self.table_access.desc_pg_id)
         insert_with_grow(global_hpalloc, heap_page, self.tuple)

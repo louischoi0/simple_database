@@ -1,18 +1,8 @@
 from core.executor import init_select, init_insert
 from core.dbmaster import DBMaster
 from core.catalog import get_public_namespace, Schema, Column, get_type_val
-from core.wal import create_xlog_heap_insert_cmd
+from core.wal import create_xlog_heap_insert_cmd, XLog
 from core.heap import StructuredTuple
-
-def test2():
-    payload = { "a": "asdfsdafb", "c": "1111"}
-    cmd = XLogHeapInsertCMD(0, 1, payload)
-
-    buffer = cmd.ser()
-
-    cmd2 = XLog.decode(buffer)
-
-    assert cmd.cmd == cmd2.cmd
 
 def test3(app):
     test_table_schema = Schema([
@@ -30,13 +20,20 @@ def test3(app):
     }
 
     tuple = StructuredTuple.load(test_table_schema, data_template)
-    cmd = create_xlog_heap_insert_cmd(xid=7, rel_id=17, page_id=0, slot_index=0, tuple=tuple)
-    app.wal_writer.write_xlog(cmd)
+    xlog = create_xlog_heap_insert_cmd(xid=7, page_id=0, slot_index=0, tuple=tuple)
+    assert xlog.cmd == "hinsertx"
+    
+    buffer = xlog.ser()
+    xlog2 = XLog.decode(buffer)
+
+    assert xlog.cmd == xlog2.cmd
+
+    #app.wal_writer.write_xlog(cmd)
 
 if __name__ == "__main__":
-    app = DBMaster(2)
-    app.activate()
+    #app = DBMaster(2)
+    #app.activate()
 
-    test3(app)
+    test3(None)
 
     #app.terminate()

@@ -66,6 +66,18 @@ class StructuredTuple(HeapTuple):
 
         cursor.at(HeapTuple.HEAP_TUPLE_HEADER_SIZE - 8)
         cursor.write_int64_a()
+    
+    def set_xmin(self, xmin):
+        self.xmin = xmin
+        cursor = buffer_cursor(self.buffer)
+        cursor.at(8)
+        cursor.write_int64(xmin)
+
+    def set_xmin(self, xmax):
+        self.xmax = xmax
+        cursor = buffer_cursor(self.buffer)
+        cursor.at(16)
+        cursor.write_int64(xmax)
 
     @classmethod
     def parse(self, buffer):
@@ -200,7 +212,6 @@ class heap_page(page):
             cursor.at(tuple_pos)
             buffer = cursor.read(size)
             item = f(buffer)
-            print(item)
 
             if raw_filter_func(item):
                 res.append(item)
@@ -240,23 +251,21 @@ class heap_page(page):
         # after read page buffer from disk
         # activate function fill all vars of instance
         # check deleted tuples and put it self.deleted
-        self.acquire_lock()
+        with self.lock:
+            if self.activated:
+                return
 
-        if self.activated:
-            return
+            self.apply_header_buffer()
+            self.load_slots_from_buffer()
+            self.deleted = []
 
-        self.apply_header_buffer()
-        self.load_slots_from_buffer()
-        self.deleted = []
+            for i, pos in enumerate(self.slots):
+                self.cursor.at(pos)
+                size = self.cursor.read_int64()
+                if size == 0:
+                    self.deleted.append(i)
 
-        for i, pos in enumerate(self.slots):
-            self.cursor.at(pos)
-            size = self.cursor.read_int64()
-            if size == 0:
-                self.deleted.append(i)
-
-        self.activated = True        
-        self.release_lock()
+            self.activated = True        
     
     def delete_tuple_by_index(self, index):
         pos = self.slots[index]
@@ -285,19 +294,34 @@ class heap_page(page):
     def capacity(self):
         return self.slot_cursor - (heap_page.SLOT_SEGMENT_OFFSET + (heap_page.SLOT_SIZE * (self.tuple_count + 1)))
     
-<<<<<<< HEAD
     def possible(self, size):
         return self.capacity() >= size
 
+    def rollback_insert(self, slot_index):
+
+        with self.lock:
+            cursor = buffer_cursor(self.buffer)
+            pos = self.slots[slot_index]
+
+            self.tuple_count -= 1
+            self.slots = self.slots[:slot_index] + self.slots[slot_index+1:]
+
+            cursor.at(pos)
+            tuple_size = cursor.read_int64()
+            cursor.at(pos)
+            cursor.pad(tuple_size)
+
+            self.write_tuple_count()
+            self.update_header_buffer()
+
+    def before_write_data(self, wal_writer, slot_index, tuple_data):
+        from core.wal import create_xlog_heap_insert_cmd
+        xlog = create_xlog_heap_insert_cmd(tuple_data.xmin, self.id, slot_index, tuple_data)
+        wal_writer.write_xlog(xlog)
+
     def insert(self, t, ctx=None):
         if ctx is not None:
-            t.xmin = ctx.xid
-=======
-    def before_write_data(self, slot_index, tuple_data, xid=99):
-        from core.wal import global_write_xlog, create_xlog_heap_insert_cmd
-        xlog = create_xlog_heap_insert_cmd(xid, self.id, slot_index, tuple_data)
-        global_write_xlog(xlog)
->>>>>>> 18f8bc6ed3e273efc781dabf643c18f588d3cadb
+            t.set_xmin(ctx.xid)
 
         with self.lock:
             assert self.id != NULL_PAGE
@@ -306,10 +330,12 @@ class heap_page(page):
             data_buffer = t.buffer
 
             if t.size > self.capacity():
-                return 0
+                return -1
 
             slot_index = len(self.slots)
-            self.before_write_data(slot_index, t)
+
+            if ctx is not None:
+                self.before_write_data(ctx.wal_writer, slot_index, t)
 
             self.write_tuple_count()
             self.add_slot(t.size)

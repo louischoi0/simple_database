@@ -21,14 +21,17 @@ def is_btree_page(page):
     else:
         return page.type in (PAGE_TYPE_DATA, PAGE_TYPE_INTERNAL, PAGE_TYPE_ROOT, )
 
+def is_meta_page(page):
+    return page.type == PAGE_TYPE_META
+
 def cast_page(page):
     if is_btree_page(page):
         from core.btree import bt_node
         return bt_node.as_btnode(page)
-    
-    if is_heap_page(page):
+    elif is_heap_page(page):
         return page.as_heap()
-    
+    elif is_meta_page(page):
+        return page
     else:
         raise Exception(f"unknown page type: {_ptype(page)}")
 
@@ -118,7 +121,11 @@ class page:
         from core.heap import heap_page
 
         p = heap_page(self.id)
+
         p.buffer = self.buffer
-        p.apply_header_buffer()
+        p.lock = self.lock
+
+        with p.lock:
+            p.apply_header_buffer()
 
         return p

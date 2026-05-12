@@ -1,10 +1,13 @@
-from core.heap import StructuredTuple, heap_page as HeapPage
+from core.heap import StructuredTuple, heap_page as HeapPage, insert_with_grow
 from core.catalog import Column, get_type_val, get_type, Schema, bootstrap_catalog_sys_columns, sys_types_schema
+from core.executor import QueryExecutionCtx
 from core.page import page
+from core.page_mgr import global_hpalloc
 from core.blk import _init_blk_driver
 from utils.buffer_cursor import buffer_cursor
 from core.const import *
 from core.dbmaster import DBMaster
+from core.meta import get_metablock
 
 test_table_schema = Schema([
     Column(0, 0, 0, "student_id", get_type_val("int"), notnull=True, defval=None),
@@ -20,9 +23,6 @@ data_template = {
     #"grade2": 2,
 }
 
-blk_driver = _init_blk_driver(1) 
-blk_driver.init_driver()
-
 def test_structed_tuple2():
     st = StructuredTuple.load(test_table_schema, data_template)
     st2 = StructuredTuple.parse(st.buffer)
@@ -37,8 +37,52 @@ def test_structed_tuple2():
     for k in data_template:
         assert st.get(k) == st2.get(k)
 
+def test_heap_page_rollback(app):
+    data = {
+        "student_id": 9,
+        "name": "louis",
+        "grade": 5
+    }
+
+    item = StructuredTuple.load(test_table_schema, data)
+    item.struct(test_table_schema)
+
+    heap = app.alloc.hpalloc()
+
+    heap.insert(item)
+    heap.rollback_insert(0)
+
+    assert len(heap.slots) == 0
+    assert heap.tuple_count == 0
+
+def test_xmin_with_ctx(app):
+    datas = []
+    ctx = QueryExecutionCtx(72, app.alloc, app.wal_writer)
+
+    for i in range(10):
+        item = data_template.copy()
+        item["student_id"] = i
+        item["name"] += str(i)
+        item["grade"] = i % 4
+
+        item = StructuredTuple.load(test_table_schema, item)
+        item.struct(test_table_schema)
+
+        datas.append(item)
+
+    heap = app.alloc.hpalloc()
+    c = 0
+    for i in datas:
+        cursor = buffer_cursor(i.buffer)
+        cursor.at(0)
+        size = cursor.read_int64()
+        heap.insert(i, ctx=ctx)
+
+        c += 1
+
 def test_heap_page_grow(app):
     datas = []
+    ctx = QueryExecutionCtx(72, app.alloc, app.wal_writer)
 
     for i in range(400):
         item = data_template.copy()
@@ -58,7 +102,7 @@ def test_heap_page_grow(app):
         cursor.at(0)
         size = cursor.read_int64()
 
-        heap.insert(i)
+        heap = insert_with_grow(global_hpalloc, heap, i)
         c += 1
     
     next_page_id = heap.read_next_page_pointer()
@@ -107,13 +151,16 @@ def test_structured_tuple(app):
         for k in data_template:
             assert a.get(k) == b[k]
         
+        read_tuple = StructuredTuple.load(test_table_schema, b)
+        print(read_tuple.xmin)
+        
     assert heap.tuple_count == len(datas) + len(heap.deleted)
     assert len(datas) == len(read_datas)
 
     heap.update_header_buffer()
-    blk_driver.write_page(heap)
+    app.blk.write_page(heap)
 
-    read_heap_page = blk_driver.read_page(heap.id)
+    read_heap_page = app.blk.read_page(heap.id)
     read_heap_page = read_heap_page.as_heap()
     read_heap_page.activate()
 
@@ -124,10 +171,14 @@ def test_structured_tuple(app):
 if __name__ == '__main__':
     app = DBMaster(2)
     app.activate()
-    app.alloc.metablock.set_max_page(2)
+    meta = get_metablock()
+    meta.bootstrap()
+    meta.init()
 
-    test_structed_tuple2()
-    test_structured_tuple(app)
-    test_heap_page_grow(app)
+    #test_heap_page_rollback(app)
+    #test_structed_tuple2()
+    #test_structured_tuple(app)
+    #test_heap_page_grow(app)
+    test_xmin_with_ctx(app)
 
     app.terminate()

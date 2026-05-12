@@ -121,6 +121,8 @@ def exec_command(cmd, app):
 
     if ctype == "init":
         blk.init_driver()
+        from core.meta import get_metablock
+        get_metablock().bootstrap()
     
     elif ctype == "new_root":
         min_key = int(cmd[1])
@@ -222,7 +224,8 @@ def start_app_procs():
         th.start()
 
 def bootstrap_main():
-    app = DBMaster()
+    import os
+    app = DBMaster(driver_num=int(os.environ["DRIVE_NUM"]))
     app.activate()
     return app
     

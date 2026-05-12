@@ -1,20 +1,24 @@
 PAGE_SIZE = 1024 * 8
 BYTE_ORDER = "little"
 HDR_SIZE = 24
+PAGE_HDR_SIZE = HDR_SIZE
 MAX_PAGE_COUNT = 256
 META_SIZE = 1024
+
+SYSTEM_PAGE_ALLOC = 200
 
 PAGE_TYPE_ROOT = 1
 PAGE_TYPE_INTERNAL = 2
 PAGE_TYPE_DATA = 3
 PAGE_TYPE_HEAP = 4
-
+PAGE_TYPE_META = 7
 
 PAGE_MAX_SYS_ID = 200
 
 # actual zero page is system page for meta information of db, 
 # so it is okay to treat zero num as null page id in case that sub component deal with except meta system
 NULL_PAGE = 0
+META_SYS_PAGE_ID = 0
 
 MAX_KEY_COUNT = 2
 MAX_SLOT_COUNT = MAX_KEY_COUNT + 1
