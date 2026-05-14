@@ -19,6 +19,7 @@ class blk_driver:
         self.lock = threading.Lock()
        
     def write_page_buffer(self, id, buffer):
+        assert len(buffer) == PAGE_SIZE
         self.f.seek(id * PAGE_SIZE + META_SIZE)
         self.f.write(buffer)
     
@@ -27,7 +28,9 @@ class blk_driver:
 
         page.update_header_buffer()
         offset = (_id(page) * PAGE_SIZE) + META_SIZE
+
         blen = len(_buffer(page))
+        assert blen == PAGE_SIZE
 
         with self.lock:
             self.f.seek(offset)

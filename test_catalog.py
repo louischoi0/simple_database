@@ -41,7 +41,7 @@ def test_structured_tuple():
     assert structured_tuple.structured_data["len"] == structured_tuple2.structured_data["len"]
     assert len(structured_tuple.structured_data) == len(structured_tuple2.structured_data)
 
-def test_create_table():
+def test_create_table(app):
 
     test_table_schema = Schema([
         Column(0, 4001, 0, "student_id", get_type_val("int"), notnull=True, defval=None),
@@ -49,7 +49,7 @@ def test_create_table():
         Column(0, 4001, 2, "grade", get_type_val("int"), notnull=True, defval=None),
     ])
 
-    create_table(get_sys_namespace(), "students", schema=test_table_schema, clustered_type="btree")
+    create_table(app.alloc, get_sys_namespace(), "students", schema=test_table_schema, clustered_type="btree")
 
 if __name__ == '__main__':
     app = DBMaster(2)
@@ -84,7 +84,7 @@ if __name__ == '__main__':
     for t in tuples:
         print(t)
 
-    test_create_table()
+    test_create_table(app)
 
     tuples = read_sys_table("tables")
     for t in tuples:

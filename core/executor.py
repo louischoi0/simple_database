@@ -1,7 +1,7 @@
 from core.catalog import Column, get_type, init_table_access
 from core.heap import StructuredTuple
 from core.page_mgr import ref_heap_page, ref_btree_page, global_hpalloc, page_allocator
-from core.catalog import get_table_schema_from_cache, is_table_clustered_heap, is_table_clustered_btree
+from core.catalog import get_table_schema_from_cache, is_table_clustered_heap, is_table_clustered_btree, raw_build_schema_from_sys_columns
 from core.wal import XLogWriter
 from core.heap import insert_with_grow
 from core.helper import _ptype
@@ -67,7 +67,7 @@ class BtreePageInsertState(QueryExecState):
         btree_root_page = ref_btree_page(self.table_access.desc_pg_id)
 
         if btree_root_page.empty():
-            return btree_root_page.insert_tuple_with_init(self.tuple)
+            return btree_root_page.insert_tuple_with_init(ctx.allocator, self.tuple)
 
         target_page = btree_root_page
 
@@ -142,6 +142,11 @@ class HeapPageScanState(QueryExecState):
 def init_insert(namespace, table_oid, raw_data):
     table_access = init_table_access(namespace, table_oid, lockmode=None)
     schema = get_table_schema_from_cache(table_oid)
+
+    if schema is None:
+        schema = raw_build_schema_from_sys_columns(table_oid)
+
+    print(schema.col_arr)
     data_tuple = StructuredTuple.load(schema, raw_data)
 
     if table_access.clustered_type == "heap":

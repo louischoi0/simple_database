@@ -13,9 +13,9 @@ _info = lambda x: info("page_mgr", x)
 alloc = None
 cache_pool = None
 
-def global_palloc():
+def global_palloc(type=0):
     global alloc
-    return alloc.palloc()
+    return alloc.palloc(type)
 
 def global_hpalloc():
     global alloc
@@ -96,7 +96,7 @@ class page_allocator:
         self.cache_pool.cache(pg)
         return pg
         
-    def palloc(self):
+    def palloc(self, page_type=0):
         new_page_id = self.metablock.inc() - 1
 
         if new_page_id < PAGE_MAX_SYS_ID:
@@ -104,6 +104,9 @@ class page_allocator:
 
         _info("page alloc: %d" % new_page_id)
         pg = page(new_page_id, -1, -1)
+
+        pg.type = page_type
+
         self.cache_pool.cache(pg)
         return pg
 

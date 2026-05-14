@@ -65,41 +65,41 @@ class bt_node:
     
     @classmethod
     def new_root_page(cls, allocator):
-        new_root_page = allocator.palloc()
+        new_root_page = allocator.palloc(PAGE_TYPE_ROOT)
         new_root_page.type = PAGE_TYPE_ROOT
         new_root_page.min_key = -1
 
-        btn = bt_node(PAGE_TYPE_ROOT, 1, new_root_page)
-        btn.slots = []
-        btn.keys = []
-
-        return btn
+        return bt_node(PAGE_TYPE_ROOT, 1, new_root_page)
     
     def empty(self):
         return len(self.slots) == 0
 
     def insert_tuple_with_init(self, alloc, tuple):
-        self.min_key = tuple.pk
+        assert self.empty()
 
-        new_data_page = alloc.palloc()
-        new_data_page.type = PAGE_TYPE_DATA
-        new_data_page.min_key = tuple.pk
+        with self.page.lock:
+            self.min_key = tuple.pk
 
-        btn = bt_node(PAGE_TYPE_DATA, 0, new_data_page)
+            new_data_page = alloc.palloc()
+            new_data_page.type = PAGE_TYPE_DATA
+            new_data_page.min_key = tuple.pk
 
-        nhpage = alloc.hpalloc()
+            btn = bt_node(PAGE_TYPE_DATA, 0, new_data_page)
 
-        nhpage.min_key = tuple.pk
+            nhpage = alloc.hpalloc()
+            nhpage.min_key = tuple.pk
+            nhpage.insert(tuple)
 
-        nhpage.insert(tuple)
+            btn.slots = [nhpage.id]
+            btn.keys = []
 
-        btn.slots = [nhpage.id]
-        btn.keys = []
+            self.slots = [ _id(new_data_page), ]
+            self.key_count = 0
+            self.page.min_key = tuple.pk
 
-        btn.update_header_buffer()
-        nhpage.update_header_buffer()
-
-        self.slots = [ _id(new_data_page), ]
+            self.update_header_buffer()
+            btn.update_header_buffer()
+            nhpage.update_header_buffer()
 
     def insert_phase_zero(self, inode):
         target = self 
@@ -140,6 +140,11 @@ class bt_node:
 
         id, type, r_min_key, level, key_count, keys, slots, next_page_id = bt_node.parse_header_buffer(_buffer(self))
         assert self.page.type == type
+
+        if self.empty():
+            assert len(self.keys) == 0 and len(keys) == 0
+        else:
+            assert len(self.keys) + 1 == len(self.slots) and len(keys) + 1 == len(slots)
 
         assert id == self.page.id
         assert type == self.page.type
@@ -334,16 +339,18 @@ class bt_node:
             return "btree data"
     
     def update_header_buffer(self):
-        assert len(self.slots) > 0
+        #assert len(self.slots) > 0
         self.page.update_header_buffer()
 
         buffer = _buffer(self) 
         c = buffer_cursor(buffer, self.page.id)
 
         c.advance(HDR_SIZE)
-
         c.write_int64(self.level)
         c.write_int64(self.key_count)
+
+        if len(self.slots) == 0:
+            return c.pad(PAGE_SIZE - c.c)
 
         for k in self.keys:
             c.write_int64(k)
@@ -392,8 +399,10 @@ class bt_node:
             slots.append(page_id)
 
         cur.advance((MAX_SLOT_COUNT - (key_count + 1)) * 8)
-
         next_page_id = cur.read_int64()
+
+        if len(slots) == 1 and slots[0] == NULL_PAGE:
+            slots = []
 
         return id, type, min_key, level, key_count, keys, slots, next_page_id
 

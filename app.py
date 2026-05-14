@@ -8,8 +8,8 @@ from core.const import *
 from core.btree import bt_node
 from core.heap import heap_page, HeapTuple, StructuredTuple
 from core.helper import _buffer, _id, _ptype, _minkey
-from core.catalog import Schema, Column, get_type, get_type_val
-from utils.logging import info, set_log_disable 
+from core.catalog import Schema, Column, get_type, get_type_val, get_public_namespace
+from utils.logging import info, set_log_disable
 from core.dbmaster import DBMaster
 
 _info = lambda x: info("app", x)
@@ -116,7 +116,6 @@ def check_btree_page(bpage, print_flag=True):
 
 def exec_command(cmd):
     ctype = cmd[0]
-    _info(f"exec: {ctype}")
 
     if ctype == "init":
         blk = _init_blk_driver(0)
@@ -207,9 +206,13 @@ def exec_command(cmd):
         new_key = int(cmd[1])
         app = bootstrap_main(False)
 
-        from core.executor import init_insert
+        from core.executor import init_insert, QueryExecutionCtx
         d0 = { "student_id": new_key, "name": "louis", "grade": 3}
-        insert_query_state = init_insert(get_sys_namespace(), 4001, d0)
+        ctx = QueryExecutionCtx(1, app.alloc, app.wal_writer)
+        from core.catalog import get_sys_namespace
+
+        insert_query_state = init_insert(get_public_namespace(), 4001, d0)
+        insert_query_state.exec(ctx)
 
     elif ctype == "insert":
         app = bootstrap_main(False)
@@ -228,6 +231,7 @@ def exec_command(cmd):
         app.blk.write_page(hpage)
     
     elif ctype == "tables":
+        set_log_disable()
         app = bootstrap_main(False)
         from core.catalog import read_sys_table
         tuples = read_sys_table("tables")
@@ -243,8 +247,8 @@ def exec_command(cmd):
             Column(999, 4001, 2, "grade", get_type_val("int"), notnull=True, defval=None),
         ])
 
-        from core.catalog import create_table, get_sys_namespace
-        table_oid = create_table(get_sys_namespace(), "students", schema=test_table_schema, clustered_type="btree")
+        from core.catalog import create_table
+        table_oid = create_table(app.alloc, get_public_namespace(), "students", schema=test_table_schema, clustered_type="btree")
         print(table_oid)
     
     elif ctype == "iter":

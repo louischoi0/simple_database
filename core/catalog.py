@@ -1,8 +1,9 @@
 from utils.buffer_cursor import buffer_cursor
-from core.page_mgr import ref_page, global_hpalloc, ref_heap_page, page_allocator as PageAllocator
+from core.page_mgr import ref_page, global_hpalloc, global_palloc, ref_heap_page, page_allocator as PageAllocator
 from core.const import *
 from core.heap import StructuredTuple, insert_with_grow
 from utils.logging import info
+from core.helper import _id
 
 _info = lambda x: info("catalog", x)
 
@@ -494,16 +495,22 @@ def insert_catalog_sys_columns(heap_page, schema: Schema):
         t = StructuredTuple.load(sys_columns_schema, column_tuple)
         heap_page = insert_with_grow(global_hpalloc, heap_page, t)
 
-def create_table(namespace, name, schema, clustered_type="heap"):
+def create_table(allocator, namespace, name, schema, clustered_type="heap"):
     object_hpage = ref_heap_page(get_sys_table_desc("objects"))
     column_hpage = ref_heap_page(get_sys_table_desc("columns"))
     table_hpage = ref_heap_page(get_sys_table_desc("tables"))
 
     new_table_oid = generate_user_oid()
 
-    table_hp = global_hpalloc()
-    table_hp.update_header_buffer()
+    if clustered_type == "heap":
+        table_pg = global_hpalloc()
+    elif clustered_type == "btree":
+        from core.btree import bt_node
+        table_pg = bt_node.new_root_page(allocator)
+    else:
+        raise Exception(f"unknown table clustered type: {clustered_type}")
 
+    table_pg.update_header_buffer()
     object = {
         "oid": new_table_oid,
         "namespace": namespace.value,
@@ -519,14 +526,15 @@ def create_table(namespace, name, schema, clustered_type="heap"):
         "oid": new_table_oid,
         "namespace": namespace.value, 
         "name": name,
-        "desc_page_id": table_hp.id,
+        "desc_page_id": _id(table_pg),
         "clustered_type": clustered_type,
     }
     table_tuple = StructuredTuple.load(sys_tables_schema, table)
     table_tuple.struct(sys_tables_schema)
-    insert_catalog_sys_table(table_hpage, table_tuple)
 
+    insert_catalog_sys_table(table_hpage, table_tuple)
     insert_catalog_sys_columns(column_hpage, schema)
+
     return new_table_oid
 
 def bootstrap_catalog_sys_columns(alloc: PageAllocator, sys_obj):
@@ -640,7 +648,6 @@ def raw_build_schema_from_sys_columns(oid):
     return schema
 
 def init_table_access(namespace, oid, lockmode=None):
-
     if is_sys_namespace(namespace):
         schema = get_table_schema_from_cache(oid)
         assert schema is not None
@@ -655,7 +662,7 @@ def init_table_access(namespace, oid, lockmode=None):
     return TableAccess(namespace, oid, schema, desc_pg_id=desc, clustered_type=clustered_type, lockmode=lockmode)
 
 def is_table_clustered_heap(table_access):
-    return table_access["clustered_type"] == "heap"
+    return table_access.clustered_type == "heap"
 
 def is_table_clustered_btree(table_access):
-    return table_access["clustered_type"] == "btree"
+    return table_access.clustered_type == "btree"
