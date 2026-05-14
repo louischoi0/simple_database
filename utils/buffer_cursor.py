@@ -3,13 +3,7 @@ import os
 from utils.dec import *
 
 
-# ─────────────────────────────────────────────
-#  내부 백엔드 추상
-# ─────────────────────────────────────────────
-
 class _MemoryBackend:
-    """기존 bytearray 기반 백엔드 (변경 없음)."""
-
     def __init__(self, buf: bytearray):
         self._buf = buf
 
@@ -23,28 +17,14 @@ class _MemoryBackend:
     def __setitem__(self, key, value):
         self._buf[key] = value
 
-    # ── 추가 연산 ────────────────────────────
     def append(self, data: bytes | bytearray):
         self._buf += data
 
     def close(self):
-        pass  # 메모리 백엔드는 리소스 해제 불필요
+        pass 
 
 
 class _MmapBackend:
-    """
-    mmap 기반 파일 백엔드.
-
-    파일이 존재하지 않거나 크기가 0이면 size 바이트로 초기화한다.
-    이후 resize()로 파일을 확장할 수 있다.
-
-    Parameters
-    ----------
-    path     : 파일 경로
-    size     : 초기 파일 크기 (파일이 없을 때만 사용)
-    writable : False면 읽기 전용 mmap
-    """
-
     def __init__(self, path: str, size: int = 0, writable: bool = True):
         self._path = path
         self._writable = writable
@@ -364,13 +344,11 @@ class buffer_cursor:
         self.c += length
 
     def write_raw_a(self, buffer):
-        """size prefix 없이 raw bytes를 쓴다."""
         length = len(buffer)
         self._backend[self.c : self.c + length] = buffer
         self.c += length
 
     def write_raw(self, buffer):
-        """size prefix 없이 raw bytes를 쓴다."""
         length = len(buffer)
         self.check(length)
         self._backend[self.c : self.c + length] = buffer
@@ -379,8 +357,6 @@ class buffer_cursor:
     def pad(self, size):
         self.check(size)
         return self.pad_a(size)
-
-    # ── 쓰기 (_a: check 생략, 빠른 경로) ────
 
     def write_int32_a(self, v):
         self._backend[self.c : self.c + 4] = serint32(v)

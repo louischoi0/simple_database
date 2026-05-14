@@ -12,10 +12,7 @@ g_xlog_writer = None
 global g_xlog_checkpointer
 g_xlog_checkpointer = None
 
-global LAST_LSN
-
 LSN_GENERATOR_LOCK = threading.Lock()
-LAST_LSN = 0
 
 CMD_SIZE = 8
 LSN_SIZE = 16
@@ -29,9 +26,13 @@ WAL_SEGMENT_SIZE = 1024 * 8 * 8
 WAL_BUFFER_OFFSET_LOCK = threading.Lock()
 
 WAL_SEGMENT_LOCK = threading.Lock()
-CURRENT_SEGMENT_FILE = "walseg00000000"
-
 WAL_CHECKPOINTER_LOCK = threading.Lock()
+
+WAL_SEGMENT_HEADER_SIZE = 0
+
+def get_next_wal_seg_file(filename):
+    num = int(filename[6:]) + 1
+    return "walseg" + num.zfill(8)
 
 class XLogWriter:
     WAL_SEGMENT_HDR_SIZE = 128
@@ -39,21 +40,30 @@ class XLogWriter:
     def __init__(self):
         self.queue = []
         self.queue_lock = threading.Lock()
-        self.current_segment_file = CURRENT_SEGMENT_FILE
-        self.cursor_pos = 0
 
+        self.current_wal_seg_file = get_metablock().get_value("current_wal_seg_file")
+        self.last_lsn = None
+        self.cursor_pos = WAL_SEGMENT_HEADER_SIZE
+    
+    def recovery_if_needed(self):
+        pass
+
+    def init(self):
+        self.recovery_if_needed()
+        offset = get_metablock().get_value("last_committed_wal_seg_pos")
+        # TODO check there is uncommitted xlog over seg pos
+        self.cursor_pos = offset
+        self.last_lsn = get_metablock().get_value("checkpointer_lsn_committed")
+    
     def enqueue_xlog(self, xlog):
         _info(f"enqueue xlog, cmd={xlog.cmd}; lsn={xlog.lsn}")
-
-        self.queue_lock.acquire()
-        self.queue.append(xlog)
-        self.queue_lock.release()
+        with self.queue_lock:
+            self.queue.append(xlog)
     
     def pop_xlog(self):
         with self.queue_lock:
             if len(self.queue) == 0:
                 return None
-
             item = self.queue[0]
             self.queue = self.queue[1:]
             return item
@@ -63,9 +73,11 @@ class XLogWriter:
 
     def write_wal_segment_entry(self, size):
         with LSN_GENERATOR_LOCK:
-            global LAST_LSN
-            LAST_LSN += 1
-            return LAST_LSN
+            self.last_lsn += 1
+            return self.last_lsn
+    
+    def wal_seg_file_overflowed(self, size):
+        return self.cursor_pos + size > WAL_SEGMENT_SIZE
 
     def write_wal_ring_buffer_entry(self, size):
         global WAL_BUFFER_RING_OFFSET
@@ -89,6 +101,11 @@ class XLogWriter:
         WAL_BUFFER_OFFSET_LOCK.release()
 
         return (ring_offset, ring_offset_end), lsn
+    
+    def create_new_wal_seg_file(self):
+        self.cursor_pos = WAL_SEGMENT_HEADER_SIZE
+        self.current_wal_seg_file = get_next_wal_seg_file(self.current_wal_seg_file)
+        get_metablock().set_current_wal_seg_file_with_commit(self.current_wal_seg_file)
 
     def write_xlog(self, xlog):
         """
@@ -104,8 +121,12 @@ class XLogWriter:
         else:
             self.write_wal_ring_buffer(ring_buffer_cursor_start, data, length)
         """
+        size = xlog.size()
 
-        (_, _,) , lsn = self.write_wal_entry(xlog.size())
+        if self.wal_seg_file_overflowed(size):
+            self.create_new_wal_seg_file()
+
+        (_, _,) , lsn = self.write_wal_entry(size)
         xlog.set_lsn(lsn)
         self.enqueue_xlog(xlog)
 
@@ -118,7 +139,7 @@ class XLogWriter:
     
     def write_xlog_into_segment_file(self, xlog):
         with WAL_SEGMENT_LOCK:
-            with buffer_cursor.from_file(self.current_segment_file, WAL_SEGMENT_SIZE) as cursor:
+            with buffer_cursor.from_file(self.current_wal_seg_file, WAL_SEGMENT_SIZE) as cursor:
                 buffer = xlog.ser()
                 cursor.at(self.cursor_pos)
                 cursor.write_raw(buffer)
@@ -142,15 +163,19 @@ class XLogCheckpointer:
         self.begin_lsn = begin
         self.end_lsn = end
         self.committed_lsn = committed
-        self.current_segment_file = CURRENT_SEGMENT_FILE
-        self.cursor_pos = 0
+        self.cursor_pos = WAL_SEGMENT_HEADER_SIZE
         self.blk = blk
         self.meta = get_metablock()
+        self.current_wal_seg_file = self.meta.get_value("current_wal_seg_file")
         self.previous_lsn = committed
+
+    def init(self):
+        # TODO same as wal writer
+        self.cursor_pos = get_metablock().get_value("last_committed_wal_seg_pos")
 
     def iter_xlog(self):
         with WAL_SEGMENT_LOCK:
-            with buffer_cursor.from_file(self.current_segment_file, WAL_SEGMENT_SIZE) as cursor:
+            with buffer_cursor.from_file(self.current_wal_seg_file, WAL_SEGMENT_SIZE) as cursor:
                 while True:
                     cursor.at(self.cursor_pos)
 
@@ -162,12 +187,13 @@ class XLogCheckpointer:
                     assert len(xlog_buffer) == length
 
                     xlog = XLog.decode(xlog_buffer)
-                    _info(f"begin xlog commit lsn={xlog.lsn} len={len(xlog_buffer)}")
+                    _info(f"begin xlog commit lsn={xlog.lsn} len={len(xlog_buffer)} cursor_pos={self.cursor_pos}")
                     self.meta.set_begin_lsn_with_commit(xlog.lsn)
                     #assert xlog.lsn == self.previous_lsn + 1
 
                     self.do_commit_xlog(xlog)
                     self.set_current_cursor_pos(cursor)
+                    self.meta.set_last_committed_wal_seg_pos_with_commit(self.cursor_pos)
                     self.previous_lsn = xlog.lsn
 
     def set_current_cursor_pos(self, cursor):
@@ -279,6 +305,14 @@ class XLogHeapInsertPayload:
 
         return XLogHeapInsertPayload(page_id, slot_index, buffer)
 
+class XLogBtreeInsertHeapPagePayload:
+    def __init__(self, xid):
+        pass
+
+class XLogBtreeInsertHeapPageCMD(XLog):
+    def __init__(self, xid, payload: XLogBtreeInsertHeapPagePayload):
+        super(XLogBtreeInsertHeapPageCMD, self).__init__(xid, "binserth", payload)
+
 class XLogHeapInsertCMD(XLog):
     def __init__(self, xid, payload: XLogHeapInsertPayload):
         super(XLogHeapInsertCMD, self).__init__(xid, "hinsertx", payload)
@@ -305,6 +339,7 @@ class XLogBeginTransactionCMD(XLog):
 def _init_wal_system(blk, metablock):
     global g_xlog_writer
     g_xlog_writer = XLogWriter()
+    g_xlog_writer.init()
 
     global g_xlog_checkpointer
     g_xlog_checkpointer = XLogCheckpointer(
@@ -313,6 +348,8 @@ def _init_wal_system(blk, metablock):
         end=metablock.checkpointer_lsn_end, 
         committed=metablock.checkpointer_lsn_committed
     )
+
+    g_xlog_checkpointer.init()
 
     return g_xlog_writer, g_xlog_checkpointer
 

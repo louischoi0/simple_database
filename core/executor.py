@@ -65,6 +65,10 @@ class BtreePageInsertState(QueryExecState):
         assert is_table_clustered_btree(self.table_access)
 
         btree_root_page = ref_btree_page(self.table_access.desc_pg_id)
+
+        if btree_root_page.empty():
+            return btree_root_page.insert_tuple_with_init(self.tuple)
+
         target_page = btree_root_page
 
         while _ptype(target_page) != PAGE_TYPE_DATA:

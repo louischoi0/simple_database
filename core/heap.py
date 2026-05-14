@@ -73,7 +73,7 @@ class StructuredTuple(HeapTuple):
         cursor.at(8)
         cursor.write_int64(xmin)
 
-    def set_xmin(self, xmax):
+    def set_xmax(self, xmax):
         self.xmax = xmax
         cursor = buffer_cursor(self.buffer)
         cursor.at(16)
@@ -105,7 +105,6 @@ class StructuredTuple(HeapTuple):
 
             assert c.pos == idx
             value = dictionary[c.name]
-
             cursor.write_dynamic_type_a(c.type.value, value)
 
         size = len(cursor.buffer)
@@ -426,15 +425,12 @@ def insert_with_grow(alloc_func, heap_page_to_insert, t):
     
     if t.size > heap_page_to_insert.capacity():
         new_page = grow(alloc_func, heap_page_to_insert, t)
-
-
-
         heap_page_to_insert.release_lock()
         return new_page
+
     else:
         heap_page_to_insert.release_lock()
         heap_page_to_insert.insert(t)
-
         return heap_page_to_insert
 
 

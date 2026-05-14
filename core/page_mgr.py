@@ -136,6 +136,11 @@ class page_cache_pool:
     def get(self, id):
         return self.pool[id]
     
+    def autocommit(self):
+        for id in self.pool:
+            pg = self.pool[id]
+            self.blkdev.write_page(pg)
+    
 def _init_mgr_module(blkdev):
     global alloc
     global cache_pool

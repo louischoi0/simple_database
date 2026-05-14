@@ -23,3 +23,8 @@ def _ptype(page):
     if hasattr(page, "page"):
         return page.page.type
     return page.type
+
+def _checksum(page):
+    if hasattr(page, "page"):
+        return page.page.checksum
+    return page.checksum

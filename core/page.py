@@ -3,6 +3,9 @@ from core.helper import _ptype
 from utils.buffer_cursor import buffer_cursor
 from threading import Lock
 
+global PG_LIST
+PG_LIST = []
+
 def serint64(value: int) -> bytes:
     return value.to_bytes(8, byteorder=BYTE_ORDER, signed=True)
 
@@ -49,6 +52,7 @@ def get_page_name(type):
 
 class page:
     def __init__(self, page_id, type, min_key):
+
         self.id = page_id
         self.min_key = min_key
         self.type = type
@@ -57,6 +61,7 @@ class page:
 
         self.lock = Lock()
         self.pin = 0
+        PG_LIST.append(page_id)
 
     def checksum(self):
         import hashlib
@@ -119,7 +124,6 @@ class page:
         assert self.type == PAGE_TYPE_HEAP
 
         from core.heap import heap_page
-
         p = heap_page(self.id)
 
         p.buffer = self.buffer

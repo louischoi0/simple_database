@@ -12,11 +12,10 @@ from core.catalog import Schema, Column, get_type, get_type_val
 from utils.logging import info, set_log_disable 
 from core.dbmaster import DBMaster
 
-app = None
 _info = lambda x: info("app", x)
 
 simple_schema = Schema([
-    Column(0, 0, "id", get_type("int"), notnull=True, defval=None, type_val=get_type_val("int")),
+    Column(99, 88, 0, "id", get_type_val("int"), notnull=True, defval=None),
 ])
 
 blk = None
@@ -40,10 +39,11 @@ def create_simple_tuple(id):
     return t
 
 def new_heap_page():
-    heap_page = app.alloc.hpalloc()
+    from core.page_mgr import global_hpalloc
+    heap_page = global_hpalloc()
     return heap_page
 
-def new_data_page_ini(allocator, min_key):
+def new_data_page_ini(app, allocator, min_key):
     new_page = allocator.palloc()
     new_page.type = PAGE_TYPE_DATA
     new_page.min_key = min_key
@@ -66,12 +66,13 @@ def new_data_page_ini(allocator, min_key):
 
     return btn
 
-def new_root_page(allocator, min_key):
+def new_root_page(app, allocator, min_key):
     new_root_page = allocator.palloc()
     new_root_page.type = PAGE_TYPE_ROOT
+    new_root_page.min_key = min_key
 
     btn = bt_node(PAGE_TYPE_ROOT, 1, new_root_page)
-    data_page = new_data_page_ini(allocator, min_key)
+    data_page = new_data_page_ini(app, allocator, min_key)
     btn.slots = [data_page.page.id]
 
     return btn
@@ -113,32 +114,50 @@ def check_btree_page(bpage, print_flag=True):
     assert bpage.next_page_id == next_page_id
     assert bpage.keys == sorted(bpage.keys)
 
-def exec_command(cmd, app):
+def exec_command(cmd):
     ctype = cmd[0]
     _info(f"exec: {ctype}")
 
-    blk = app.blk
-
     if ctype == "init":
+        blk = _init_blk_driver(0)
         blk.init_driver()
+
+        from core.meta import _init_meta_system
         from core.meta import get_metablock
+        _init_meta_system(blk)
         get_metablock().bootstrap()
+        return None
+
+    elif ctype == "bootstrap":
+        app = bootstrap_main(False)
+        from core.catalog import bootstrap_catalog_sys_types, bootstrap_catalog_sys_objects, bootstrap_catalog_sys_tables, bootstrap_catalog_sys_columns
+
+        bootstrap_catalog_sys_types(app.alloc)
+        bootstrap_catalog_sys_objects(app.alloc)
+        bootstrap_catalog_sys_tables(app.alloc)
+
+        bootstrap_catalog_sys_columns(app.alloc, "columns")
+        bootstrap_catalog_sys_columns(app.alloc,"types")
+        bootstrap_catalog_sys_columns(app.alloc,"objects")
+        bootstrap_catalog_sys_columns(app.alloc,"tables")
     
     elif ctype == "new_root":
+        app = bootstrap_main(False)
+        
         min_key = int(cmd[1])
-        root_page = new_root_page(app.alloc, min_key)
+        root_page = new_root_page(app, app.alloc, min_key)
 
         root_page.update_header_buffer()
         check_btree_page(root_page, print_flag=False)
 
-        blk.write_page(root_page.page)
-        blk.commit_metablock(app.alloc.metablock)
+        app.blk.write_page(root_page.page)
     
     elif ctype == "insert_bt":
+        app = bootstrap_main(False)
         root_page_id = int(cmd[1])
         new_key = int(cmd[2])
 
-        page = blk.read_page(root_page_id)
+        page = app.blk.read_page(root_page_id)
         btn = bt_node.as_btnode(page)
 
         h = new_heap_page()
@@ -149,15 +168,15 @@ def exec_command(cmd, app):
         btn.insert(h)
         btn.update_header_buffer()
 
-        blk.write_page(h)
-        blk.write_page(btn)
+        app.blk.write_page(h)
+        app.blk.write_page(btn)
     
     elif ctype == "read":
+        app = bootstrap_main(False)
         set_log_disable()
 
         page_id = int(cmd[1])
-
-        page = blk.read_page(page_id)
+        page = app.blk.read_page(page_id)
 
         if is_btree_page(page):
             btn = bt_node.as_btnode(page)
@@ -171,6 +190,7 @@ def exec_command(cmd, app):
             raise Exception(f"invalid page type: {page.type}")
     
     elif ctype == "test":
+        app = bootstrap_main(False) 
         h = new_heap_page()
         h.id = 9
         h.min_key = 11
@@ -179,16 +199,24 @@ def exec_command(cmd, app):
         a, b, c, d = heap_page.parse_header_buffer(buffer)
 
     elif ctype == "new_heap":
+        app = bootstrap_main(False)
         h = new_heap_page()
-        blk.write_page(h)
+        app.blk.write_page(h)
+    
+    elif ctype == "bt_insert_tp": 
+        new_key = int(cmd[1])
+        app = bootstrap_main(False)
 
-        blk.commit_metablock(app.alloc.metablock)
+        from core.executor import init_insert
+        d0 = { "student_id": new_key, "name": "louis", "grade": 3}
+        insert_query_state = init_insert(get_sys_namespace(), 4001, d0)
 
     elif ctype == "insert":
+        app = bootstrap_main(False)
         page_id = int(cmd[1])
         value = int(cmd[2])
 
-        page = blk.read_page(page_id)
+        page = app.blk.read_page(page_id)
         hpage = page.as_heap()
         hpage.apply_header_buffer()
 
@@ -197,13 +225,33 @@ def exec_command(cmd, app):
 
         hpage.insert(HeapTuple(value))
 
-        blk.write_page(hpage)
-        blk.commit_metablock(app.alloc.metablock)
+        app.blk.write_page(hpage)
+    
+    elif ctype == "tables":
+        app = bootstrap_main(False)
+        from core.catalog import read_sys_table
+        tuples = read_sys_table("tables")
+        for t in tuples:
+            print(t)
+    
+    elif ctype == "create":
+        app = bootstrap_main(False)
+
+        test_table_schema = Schema([
+            Column(999, 4001, 0, "student_id", get_type_val("int"), notnull=True, defval=None),
+            Column(999, 4001, 1, "name", get_type_val("varchar"), notnull=True, defval=None),
+            Column(999, 4001, 2, "grade", get_type_val("int"), notnull=True, defval=None),
+        ])
+
+        from core.catalog import create_table, get_sys_namespace
+        table_oid = create_table(get_sys_namespace(), "students", schema=test_table_schema, clustered_type="btree")
+        print(table_oid)
     
     elif ctype == "iter":
+        app = bootstrap_main(False)
         page_id = int(cmd[1])
 
-        page = blk.read_page(page_id)
+        page = app.blk.read_page(page_id)
 
         assert page.type == PAGE_TYPE_HEAP
         assert page.id == page_id
@@ -212,30 +260,29 @@ def exec_command(cmd, app):
         hpage.apply_header_buffer()
         _info("iter page %d (%d k)" % (hpage.id, hpage.tuple_count))
         hpage.iter(print)
-        blk.commit_metablock(app.alloc.metablock)
    
     else: 
         raise Exception("unknown command type: ", ctype)
+    
+    return app
 
-PROCS = {}
-
-def start_app_procs():
-    for th in PROCS:
-        th.start()
-
-def bootstrap_main():
+def bootstrap_main(background=True):
     import os
-    app = DBMaster(driver_num=int(os.environ["DRIVE_NUM"]))
+    num = os.environ.get("DRIVE_NUM", 0)
+    app = DBMaster(driver_num=int(num))
+
+    if not background:
+        app.disable_background_proc()
+
     app.activate()
     return app
     
 if __name__ == "__main__":
-    app = bootstrap_main()
-
     if sys.argv[1] == "test":
         exit(0)
 
-    exec_command(sys.argv[1:], app)
+    app = exec_command(sys.argv[1:])
 
     if sys.argv[1] != "init":
-        app.blk.commit_metablock(app.alloc.metablock)
+        app.meta.commit_metablock()
+        app.cache_pool.autocommit()

@@ -1,5 +1,5 @@
 from utils.buffer_cursor import buffer_cursor
-from core.page_mgr import sys_hpalloc_ref, ref_page, global_hpalloc, ref_heap_page
+from core.page_mgr import ref_page, global_hpalloc, ref_heap_page, page_allocator as PageAllocator
 from core.const import *
 from core.heap import StructuredTuple, insert_with_grow
 from utils.logging import info
@@ -402,7 +402,7 @@ sys_tables_schema = Schema([
 
 cache_table_schema(get_sys_object_id("tables"), sys_tables_schema)
 
-def bootstrap_catalog_sys_objects():
+def bootstrap_catalog_sys_objects(alloc: PageAllocator):
     objects_raw_tuples = [
         {
             "oid": get_sys_object_id("types"),  
@@ -430,7 +430,7 @@ def bootstrap_catalog_sys_objects():
         },
     ]
 
-    hpage = sys_hpalloc_ref(get_sys_table_desc("objects"))
+    hpage = alloc.sys_hpalloc_ref(get_sys_table_desc("objects"))
 
     for d in objects_raw_tuples:
         objects_tuple = StructuredTuple.load(sys_objects_schema, d)
@@ -439,7 +439,7 @@ def bootstrap_catalog_sys_objects():
 
     _info(f"objects row initialized: {hpage.checksum()}")
 
-def bootstrap_catalog_sys_tables():
+def bootstrap_catalog_sys_tables(alloc: PageAllocator):
     tables_raw_tuples = [
         {
             "oid": get_sys_object_id("types"),  
@@ -471,7 +471,7 @@ def bootstrap_catalog_sys_tables():
         },
     ]
 
-    hpage = sys_hpalloc_ref(get_sys_table_desc("tables"))
+    hpage = alloc.sys_hpalloc_ref(get_sys_table_desc("tables"))
 
     for d in tables_raw_tuples:
         objects_tuple = StructuredTuple.load(sys_tables_schema, d)
@@ -495,9 +495,9 @@ def insert_catalog_sys_columns(heap_page, schema: Schema):
         heap_page = insert_with_grow(global_hpalloc, heap_page, t)
 
 def create_table(namespace, name, schema, clustered_type="heap"):
-    object_hpage = sys_hpalloc_ref(get_sys_table_desc("objects"))
-    column_hpage = sys_hpalloc_ref(get_sys_table_desc("columns"))
-    table_hpage = sys_hpalloc_ref(get_sys_table_desc("tables"))
+    object_hpage = ref_heap_page(get_sys_table_desc("objects"))
+    column_hpage = ref_heap_page(get_sys_table_desc("columns"))
+    table_hpage = ref_heap_page(get_sys_table_desc("tables"))
 
     new_table_oid = generate_user_oid()
 
@@ -527,10 +527,11 @@ def create_table(namespace, name, schema, clustered_type="heap"):
     insert_catalog_sys_table(table_hpage, table_tuple)
 
     insert_catalog_sys_columns(column_hpage, schema)
+    return new_table_oid
 
-def bootstrap_catalog_sys_columns(sys_obj):
+def bootstrap_catalog_sys_columns(alloc: PageAllocator, sys_obj):
     _info(f"{sys_obj} bootstrapping...")
-    hpage = sys_hpalloc_ref(get_sys_table_desc("columns"))
+    hpage = alloc.sys_hpalloc_ref(get_sys_table_desc("columns"))
     oid = get_sys_object_id(sys_obj)
     schema = get_table_schema_from_cache(oid)
 
@@ -540,9 +541,9 @@ def bootstrap_catalog_sys_columns(sys_obj):
     insert_catalog_sys_columns(hpage, schema)
     _info(f"{sys_obj} table initialized: {hpage.checksum()}")
 
-def bootstrap_catalog_sys_types():
+def bootstrap_catalog_sys_types(alloc: PageAllocator):
     _info(f"sys_types bootstrapping ...")
-    hpage = sys_hpalloc_ref(get_sys_table_desc("types"))
+    hpage = alloc.sys_hpalloc_ref(get_sys_table_desc("types"))
     tuples = [
         {
             "oid": get_type_oid("int"),

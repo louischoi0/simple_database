@@ -17,6 +17,8 @@ class DBMaster:
         self.wal_writer = None
         self.wal_checkpointer = None
 
+        self.background_proc_disabled = False
+
     def activate(self):
         blk = _init_blk_driver(self.driver_num)
         self.meta = _init_meta_system(blk)
@@ -29,7 +31,8 @@ class DBMaster:
         self.cache_pool = cache_pool
         self.wal_writer, self.wal_checkpointer = _init_wal_system(self.blk, self.meta)
 
-        self.fork_pg_wal_proc()
+        if not self.background_proc_disabled:
+            self.fork_pg_wal_proc()
     
     def fork_pg_wal_proc(self):
         th = threading.Thread(target=self.wal_checkpointer.proc)
@@ -46,3 +49,6 @@ class DBMaster:
     def terminate(self):
         self.wal_checkpointer.wait_to_terminate()
         exit(0)
+    
+    def disable_background_proc(self):
+        self.background_proc_disabled = True

@@ -7,8 +7,9 @@ if __name__ == "__main__":
 
     blk = _init_blk_driver(driver_num)
     meta = _init_meta_system(blk)
-    meta.bootstrap()
+    #meta.bootstrap()
     meta = get_metablock()
     meta.init()
     print(meta)
+    print(meta.meta_page.checksum())
 

@@ -62,6 +62,44 @@ class bt_node:
             split_node = self.split(inode)
 
         return split_node, insert_index
+    
+    @classmethod
+    def new_root_page(cls, allocator):
+        new_root_page = allocator.palloc()
+        new_root_page.type = PAGE_TYPE_ROOT
+        new_root_page.min_key = -1
+
+        btn = bt_node(PAGE_TYPE_ROOT, 1, new_root_page)
+        btn.slots = []
+        btn.keys = []
+
+        return btn
+    
+    def empty(self):
+        return len(self.slots) == 0
+
+    def insert_tuple_with_init(self, alloc, tuple):
+        self.min_key = tuple.pk
+
+        new_data_page = alloc.palloc()
+        new_data_page.type = PAGE_TYPE_DATA
+        new_data_page.min_key = tuple.pk
+
+        btn = bt_node(PAGE_TYPE_DATA, 0, new_data_page)
+
+        nhpage = alloc.hpalloc()
+
+        nhpage.min_key = tuple.pk
+
+        nhpage.insert(tuple)
+
+        btn.slots = [nhpage.id]
+        btn.keys = []
+
+        btn.update_header_buffer()
+        nhpage.update_header_buffer()
+
+        self.slots = [ _id(new_data_page), ]
 
     def insert_phase_zero(self, inode):
         target = self 

@@ -8,6 +8,7 @@ from utils.buffer_cursor import buffer_cursor
 from core.const import *
 from core.dbmaster import DBMaster
 from core.meta import get_metablock
+from utils.logging import timer
 
 test_table_schema = Schema([
     Column(0, 0, 0, "student_id", get_type_val("int"), notnull=True, defval=None),
@@ -55,9 +56,11 @@ def test_heap_page_rollback(app):
     assert len(heap.slots) == 0
     assert heap.tuple_count == 0
 
+@timer
 def test_xmin_with_ctx(app):
     datas = []
-    ctx = QueryExecutionCtx(72, app.alloc, app.wal_writer)
+    TEST_TXID = 72
+    ctx = QueryExecutionCtx(TEST_TXID, app.alloc, app.wal_writer)
 
     for i in range(10):
         item = data_template.copy()
@@ -79,6 +82,15 @@ def test_xmin_with_ctx(app):
         heap.insert(i, ctx=ctx)
 
         c += 1
+    
+    from core.page_mgr import ref_heap_page
+    read = ref_heap_page(heap.id)
+    read = read.as_heap()
+    read.activate()
+
+    read_datas = heap.raw_map(lambda buffer: StructuredTuple.parse(buffer))
+    for i in read_datas:
+        assert i.xmin == TEST_TXID
 
 def test_heap_page_grow(app):
     datas = []
@@ -169,16 +181,12 @@ def test_structured_tuple(app):
     print(heap.checksum())
 
 if __name__ == '__main__':
-    app = DBMaster(2)
+    app = DBMaster()
     app.activate()
-    meta = get_metablock()
-    meta.bootstrap()
-    meta.init()
 
-    #test_heap_page_rollback(app)
-    #test_structed_tuple2()
-    #test_structured_tuple(app)
-    #test_heap_page_grow(app)
+    test_heap_page_rollback(app)
+    test_structed_tuple2()
+    test_structured_tuple(app)
+    test_heap_page_grow(app)
     test_xmin_with_ctx(app)
-
     app.terminate()
