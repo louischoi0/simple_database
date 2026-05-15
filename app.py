@@ -2,13 +2,13 @@ import sys
 import threading
 
 from core.blk import _init_blk_driver
-from core.page_mgr import page_allocator, _init_mgr_module
+from core.page_mgr import page_allocator, _init_mgr_module, ref_heap_page
 from core.page import get_page_name, is_btree_page, is_heap_page
 from core.const import *
 from core.btree import bt_node
 from core.heap import heap_page, HeapTuple, StructuredTuple
 from core.helper import _buffer, _id, _ptype, _minkey
-from core.catalog import Schema, Column, get_type, get_type_val, get_public_namespace
+from core.catalog import Schema, Column, get_type, get_type_val, get_public_namespace, init_table_access, raw_build_schema_from_sys_columns
 from utils.logging import info, set_log_disable
 from core.dbmaster import DBMaster
 
@@ -151,16 +151,30 @@ def exec_command(cmd):
 
         app.blk.write_page(root_page.page)
     
+    elif ctype == "set_desc_pg_id":
+        app = bootstrap_main(False)
+        table_oid = int(cmd[1])
+        new_desc_pg_id = int(cmd[2])
+
+        from core.catalog import raw_update_sys_tables_table_desc
+        raw_update_sys_tables_table_desc(table_oid, new_desc_pg_id)
+    
     elif ctype == "insert_bt":
         app = bootstrap_main(False)
         root_page_id = int(cmd[1])
         new_key = int(cmd[2])
+        table_oid = 4001
 
         page = app.blk.read_page(root_page_id)
         btn = bt_node.as_btnode(page)
 
         h = new_heap_page()
-        h.insert(create_simple_tuple(new_key))
+        d0 = { "student_id": new_key, "name": "louis", "grade": 3}
+        schema = raw_build_schema_from_sys_columns(table_oid)
+
+        t = StructuredTuple.load(schema, d0)
+
+        h.insert(t)
         h.mark_min_key(new_key)
         h.update_header_buffer()
 
@@ -213,6 +227,19 @@ def exec_command(cmd):
 
         insert_query_state = init_insert(get_public_namespace(), 4001, d0)
         insert_query_state.exec(ctx)
+    
+    elif ctype == "select_heap":
+        app = bootstrap_main(False)
+        set_log_disable()
+        table_oid = int(cmd[1])
+        heap_page_id = int(cmd[2])
+        table_access = init_table_access(get_public_namespace(), table_oid, lockmode=None)
+
+        heap_page = ref_heap_page(heap_page_id)
+        read_datas = heap_page.raw_map(lambda buffer: StructuredTuple.parse(buffer).struct(table_access.schema))
+
+        for data in read_datas:
+            print(data)
 
     elif ctype == "insert":
         app = bootstrap_main(False)

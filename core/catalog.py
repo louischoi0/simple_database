@@ -628,7 +628,16 @@ def raw_get_sys_tables(oid):
     if buffer is None:
         raise Exception(f"table row for oid:{oid} does not exists in sys.tables")
     
-    return StructuredTuple.parse(buffer).struct(sys_tables_schema)
+    return StructuredTuple.parse(buffer)
+
+def raw_update_sys_tables_table_desc(oid, desc_pg_id):
+    page_heap = ref_heap_page(get_sys_table_desc("tables"))
+
+    table_row = raw_get_sys_tables(oid).struct(sys_tables_schema)
+    table_row["desc_page_id"] = desc_pg_id
+
+    table_row_new_tuple = StructuredTuple.load(sys_tables_schema, table_row)
+    return page_heap.update(table_row["oid"], table_row_new_tuple)
 
 def raw_build_schema_from_sys_columns(oid):
     schema = get_table_schema_from_cache(oid)
@@ -654,7 +663,7 @@ def init_table_access(namespace, oid, lockmode=None):
         desc = get_sys_table_desc()
 
     else: 
-        table_row = raw_get_sys_tables(oid)
+        table_row = raw_get_sys_tables(oid).struct(sys_tables_schema)
         desc = table_row["desc_page_id"]
         clustered_type = table_row["clustered_type"]
         schema = raw_build_schema_from_sys_columns(oid)

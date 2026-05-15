@@ -3,6 +3,7 @@ from core.page import page
 from utils.buffer_cursor import buffer_cursor
 from utils.dec import *
 from utils.logging import info
+from core.helper import _buffer
 
 XFLAG_SIZE = 8
 _info = lambda msg: info("heap", msg)
@@ -220,7 +221,6 @@ class heap_page(page):
     def raw_map(self, f):
         cursor = self.cursor
         res = []
-
         for index, tuple_pos in enumerate(self.slots):
             if index in self.deleted:
                 continue 
@@ -317,31 +317,63 @@ class heap_page(page):
         from core.wal import create_xlog_heap_insert_cmd
         xlog = create_xlog_heap_insert_cmd(tuple_data.xmin, self.id, slot_index, tuple_data)
         wal_writer.write_xlog(xlog)
+    
+    def get_slot_index_by_pk(self, pk):
+        cursor = buffer_cursor(_buffer(self))
 
-    def insert(self, t, ctx=None):
+        for idx, pos in enumerate(self.slots):
+            if idx in self.deleted:
+                continue
+
+            cursor.at(pos)
+
+            size = cursor.read_int64() 
+            cursor.at(pos)
+            tuple_buffer = cursor.read(size)
+
+            _cursor = buffer_cursor(tuple_buffer)
+            _cursor.at(HeapTuple.HEAP_TUPLE_HEADER_SIZE)
+
+            _pk = _cursor.read_int64()
+
+            if pk == _pk:
+                return idx
+        return -1 
+
+    def update(self, pk, new_tuple):
+        with self.lock:
+            slot_index = self.get_slot_index_by_pk(pk)
+            assert slot_index != -1
+
+            self.delete_tuple_by_index(slot_index)
+            return self.insert(new_tuple, locking=False)
+
+    def insert(self, t, ctx=None, locking=True):
+        locking and self.lock.acquire()
+
         if ctx is not None:
             t.set_xmin(ctx.xid)
 
-        with self.lock:
-            assert self.id != NULL_PAGE
+        assert self.id != NULL_PAGE
 
-            self.tuple_count += 1
-            data_buffer = t.buffer
+        self.tuple_count += 1
+        data_buffer = t.buffer
 
-            if t.size > self.capacity():
-                return -1
+        if t.size > self.capacity():
+            return -1
 
-            slot_index = len(self.slots)
+        slot_index = len(self.slots)
 
-            if ctx is not None:
-                self.before_write_data(ctx.wal_writer, slot_index, t)
+        if ctx is not None:
+            self.before_write_data(ctx.wal_writer, slot_index, t)
 
-            self.write_tuple_count()
-            self.add_slot(t.size)
-            self.write_tuple_data(t.size, data_buffer)
+        self.write_tuple_count()
+        self.add_slot(t.size)
+        self.write_tuple_data(t.size, data_buffer)
 
-            self.update_header_buffer()
-            return slot_index
+        self.update_header_buffer()
+        locking and self.lock.release()
+        return slot_index
     
     def ptype(self):
         return "heap"

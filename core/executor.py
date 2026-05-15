@@ -4,9 +4,12 @@ from core.page_mgr import ref_heap_page, ref_btree_page, global_hpalloc, page_al
 from core.catalog import get_table_schema_from_cache, is_table_clustered_heap, is_table_clustered_btree, raw_build_schema_from_sys_columns
 from core.wal import XLogWriter
 from core.heap import insert_with_grow
-from core.helper import _ptype
+from core.helper import _ptype, _id
 from core.const import *
 from dataclasses import dataclass
+from utils.logging import info
+
+_info = lambda x: info("executor", x)
 
 class QueryOperator:
     def __init__(self, name, *args):
@@ -63,6 +66,8 @@ class BtreePageInsertState(QueryExecState):
 
     def exec(self, ctx: QueryExecutionCtx):
         assert is_table_clustered_btree(self.table_access)
+        from core.btree import bt_cursor, bt_node
+        cursor = bt_cursor()
 
         btree_root_page = ref_btree_page(self.table_access.desc_pg_id)
 
@@ -70,20 +75,35 @@ class BtreePageInsertState(QueryExecState):
             return btree_root_page.insert_tuple_with_init(ctx.allocator, self.tuple)
 
         target_page = btree_root_page
+        cursor.visit(target_page)
 
         while _ptype(target_page) != PAGE_TYPE_DATA:
-            target_page_index = target_page.find_leaf_index_to_insert(self.tuple.pk)
-            target_page = ref_btree_page(target_page_index)
+            target_page_index = target_page.get_internal_node_idx_to_go_down(self.tuple.pk)
+            target_page = ref_btree_page(target_page.slots[target_page_index])
+
+        _info(f"tuple_id={self.tuple.pk}, target_page_id={_id(target_page)}, target_page_index={target_page_index}")
 
         if target_page_index == target_page.key_count + 1 or target_page_index == 0:
             new_heap_page = global_hpalloc()
             new_heap_page.insert(self.tuple, ctx=ctx)
             new_heap_page.mark_min_key(self.tuple.pk)
-            return target_page.insert(new_heap_page)
+
+            split_node, c, _ = target_page.insert_phase_zero(new_heap_page)
+            assert c.size() == 1
+
+            if split_node is None:
+                return target_page
+
+            new_root = bt_node.merge_split_node(self.tuple.pk, cursor, split_node)
+
+            if _id(new_root) != _id(btree_root_page):
+                from core.catalog import raw_update_sys_tables_table_desc
+                raw_update_sys_tables_table_desc(self.table_access.oid, _id(new_root))
 
         else:
-            heap_page_index = target_page.find_leaf_index_to_insert(self.tuple.pk)
-            heap_page = ref_heap_page(target_page.slots[heap_page_index])
+            heap_page_index = target_page.find_leaf_index_to_insert_page(self.tuple.pk)
+            heap_page = ref_heap_page(target_page.slots[heap_page_index-1])
+            _info(f"insert tuple #{self.tuple.pk} to exisiting heap page #{heap_page.id}")
             insert_with_grow(global_hpalloc, heap_page, self.tuple)
 
         return 1

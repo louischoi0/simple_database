@@ -1,5 +1,5 @@
 from core.const import *
-from core.page import is_btree_page, page
+from core.page import is_btree_page, page, is_heap_page
 from core.page_mgr import ref_page, ref_minkey
 from core.helper import _buffer, _ptype, _minkey, _id
 from core.page_mgr import global_palloc
@@ -13,6 +13,9 @@ class bt_cursor:
     def __init__(self):
         self.ns = []
         self.count = 0
+    
+    def size(self):
+        return len(self.ns)
     
     def visit(self, node):
         self.ns.append(node)
@@ -112,6 +115,12 @@ class bt_node:
         while True:
             vnode_id = target.get_internal_node_to_go_down(tuple_key)
             vnode = ref_page(vnode_id)
+
+            # rechaed end of nodes in btree data nodes
+            if not is_btree_page(vnode):
+                cursor.visit(target)
+                return target.split(inode), cursor, -1
+
             vnode = bt_node.as_btnode(vnode)
 
             if _ptype(vnode) != PAGE_TYPE_DATA:
@@ -156,23 +165,14 @@ class bt_node:
         assert keys == sorted(keys)
         assert keys == self.keys
         assert self.level == level
-
-    def insert(self, inode):
-        assert _ptype(self) == PAGE_TYPE_ROOT
-
-        split_node, cursor, insert_index = self.insert_phase_zero(inode)
-        insert_min_key = _minkey(inode)
+    
+    @classmethod
+    def merge_split_node(cls, insert_min_key, cursor, split_node):
+        target = cursor.pop()
         node_type_before_split = None
 
-        if split_node is None:
-            if insert_index == 0:
-                self.update_min_key_upper_nodes(insert_min_key, cursor)
-            return self
-
-        target = cursor.pop()
-
         while True:
-            _info(f"pop visit node for split recovery {_id(target)}")
+            _info(f"pop visit node for split recovery id={_id(target)}, ptype={_ptype(target)}")
             assert _ptype(target) != PAGE_TYPE_DATA
 
             node_type_before_split = _ptype(target)
@@ -180,8 +180,8 @@ class bt_node:
 
             if split_node is None:
                 if insert_index == 0:
-                    self.update_min_key_upper_nodes(insert_min_key)
-                return self
+                    target.update_min_key_upper_nodes(insert_min_key)
+                return target
 
             ntarget = cursor.pop_try()
 
@@ -206,6 +206,19 @@ class bt_node:
         target.update_header_buffer()
 
         return new_root_btn
+
+    def insert(self, inode):
+        assert _ptype(self) == PAGE_TYPE_ROOT
+
+        split_node, cursor, insert_index = self.insert_phase_zero(inode)
+        insert_min_key = _minkey(inode)
+
+        if split_node is None:
+            if insert_index == 0:
+                self.update_min_key_upper_nodes(insert_min_key, cursor)
+            return self
+
+        return bt_node.merge_split_node(insert_min_key, cursor, split_node)
         
     def set_page_type(self, type):
         self.page.type = type
@@ -305,11 +318,14 @@ class bt_node:
         self.update_header_buffer()
         return index
     
-    def get_internal_node_to_go_down(self, tuple_key):
+    def get_internal_node_idx_to_go_down(self, tuple_key):
         for i, k in enumerate(self.keys):
             if tuple_key < k:
-                return self.slots[i]
-        return self.slots[-1]
+                return i
+        return len(self.slots) - 1
+
+    def get_internal_node_to_go_down(self, tuple_key):
+        return self.slots[self.get_internal_node_idx_to_go_down(tuple_key)]
 
     def find_leaf_index_to_insert_page(self, tuple_key):
         idx = 0
