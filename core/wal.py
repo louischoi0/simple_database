@@ -305,13 +305,31 @@ class XLogHeapInsertPayload:
 
         return XLogHeapInsertPayload(page_id, slot_index, buffer)
 
-class XLogBtreeInsertHeapPagePayload:
-    def __init__(self, xid):
-        pass
+class XLogBtreeInsertSlotCMDPayload:
+    def __init__(self, target_page_id, new_page_id, slot_index):
+        self.target_page_id = target_page_id
+        self.new_page_id = new_page_id
+        self.slot_index = slot_index
+    
+    def ser(self):
+        cursor = buffer_cursor()
+        cursor.write_int64_a(self.target_page_id)
+        cursor.write_int64_a(self.new_page_id)
+        cursor.write_int64_a(self.slot_index)
 
-class XLogBtreeInsertHeapPageCMD(XLog):
-    def __init__(self, xid, payload: XLogBtreeInsertHeapPagePayload):
-        super(XLogBtreeInsertHeapPageCMD, self).__init__(xid, "binserth", payload)
+    @classmethod
+    def decode(cls, buffer):
+        cursor = buffer_cursor(buffer)
+
+        target_page_id = cursor.read_int64()
+        new_page_id = cursor.read_int64()
+        slot_index = cursor.read_int64()
+
+        return XLogBtreeInsertSlotCMDPayload(target_page_id, new_page_id, slot_index)
+
+class XLogBtreeInsertSlotCMD(XLog):
+    def __init__(self, xid, payload: XLogBtreeInsertSlotCMDPayload):
+        super(XLogBtreeInsertSlotCMD, self).__init__(xid, "binserth", payload)
 
 class XLogHeapInsertCMD(XLog):
     def __init__(self, xid, payload: XLogHeapInsertPayload):

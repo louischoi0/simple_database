@@ -125,6 +125,8 @@ def exec_command(cmd):
         from core.meta import get_metablock
         _init_meta_system(blk)
         get_metablock().bootstrap()
+        app.cache_pool.autocommit()
+        exit(0)
         return None
 
     elif ctype == "bootstrap":
@@ -139,6 +141,8 @@ def exec_command(cmd):
         bootstrap_catalog_sys_columns(app.alloc,"types")
         bootstrap_catalog_sys_columns(app.alloc,"objects")
         bootstrap_catalog_sys_columns(app.alloc,"tables")
+        app.cache_pool.autocommit()
+        exit(0)
     
     elif ctype == "new_root":
         app = bootstrap_main(False)
@@ -254,7 +258,6 @@ def exec_command(cmd):
         assert hpage.id == page_id
 
         hpage.insert(HeapTuple(value))
-
         app.blk.write_page(hpage)
     
     elif ctype == "tables":
@@ -316,4 +319,4 @@ if __name__ == "__main__":
 
     if sys.argv[1] != "init":
         app.meta.commit_metablock()
-        app.cache_pool.autocommit()
+        #app.cache_pool.autocommit()

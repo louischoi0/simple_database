@@ -9,10 +9,6 @@ _info = lambda x: info("catalog", x)
 
 global SYS_OBJECTS
 
-global OBJECT_CACHE 
-OBJECT_CACHE = {
-}
-
 SYS_OBJECTS = {}
 SYS_OBJECTS__NAME = {}
 

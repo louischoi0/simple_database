@@ -1,3 +1,4 @@
+import os
 from utils.dec import *
 from utils.logging import info
 from utils.buffer_cursor import buffer_cursor
@@ -137,8 +138,16 @@ class metablock:
     def get_value(self, key):
         with self.lock:
             return getattr(self, key)
+        
+    def delete_old_wal_files(self):
+        try:
+            os.remove(START_WAL_SEGFILE)
+        except FileNotFoundError:
+            pass
     
     def bootstrap(self):
+        self.delete_old_wal_files()
+
         self.meta_page = self.read_meta_page()
         self.meta_page.type = PAGE_TYPE_META
         self.meta_page.id = META_SYS_PAGE_ID

@@ -72,7 +72,7 @@ class BtreePageInsertState(QueryExecState):
         btree_root_page = ref_btree_page(self.table_access.desc_pg_id)
 
         if btree_root_page.empty():
-            return btree_root_page.insert_tuple_with_init(ctx.allocator, self.tuple)
+            return btree_root_page.insert_tuple_with_init(ctx.allocator, self.tuple, ctx=ctx)
 
         target_page = btree_root_page
         cursor.visit(target_page)
@@ -88,13 +88,13 @@ class BtreePageInsertState(QueryExecState):
             new_heap_page.insert(self.tuple, ctx=ctx)
             new_heap_page.mark_min_key(self.tuple.pk)
 
-            split_node, c, _ = target_page.insert_phase_zero(new_heap_page)
+            split_node, c, _ = target_page.insert_phase_zero(new_heap_page, ctx=ctx)
             assert c.size() == 1
 
             if split_node is None:
                 return target_page
 
-            new_root = bt_node.merge_split_node(self.tuple.pk, cursor, split_node)
+            new_root = bt_node.merge_split_node(self.tuple.pk, cursor, split_node, ctx=ctx)
 
             if _id(new_root) != _id(btree_root_page):
                 from core.catalog import raw_update_sys_tables_table_desc

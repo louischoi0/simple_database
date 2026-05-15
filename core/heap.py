@@ -25,6 +25,12 @@ class HeapTuple:
     @classmethod
     def parse(self, buffer):
         return toint64(buffer)
+    
+    @classmethod
+    def get_pk_from_buffer(cls, buffer):
+        cursor = buffer_cursor(buffer)
+        cursor.at(HeapTuple.HEAP_TUPLE_HEADER_SIZE)
+        return cursor.read_int64()
 
 class StructuredTuple(HeapTuple):
     def __init__(self, buffer):
@@ -330,11 +336,7 @@ class heap_page(page):
             size = cursor.read_int64() 
             cursor.at(pos)
             tuple_buffer = cursor.read(size)
-
-            _cursor = buffer_cursor(tuple_buffer)
-            _cursor.at(HeapTuple.HEAP_TUPLE_HEADER_SIZE)
-
-            _pk = _cursor.read_int64()
+            _pk = HeapTuple.get_pk_from_buffer(tuple_buffer)
 
             if pk == _pk:
                 return idx

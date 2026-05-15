@@ -77,7 +77,7 @@ class bt_node:
     def empty(self):
         return len(self.slots) == 0
 
-    def insert_tuple_with_init(self, alloc, tuple):
+    def insert_tuple_with_init(self, alloc, tuple, ctx=None):
         assert self.empty()
 
         with self.page.lock:
@@ -91,7 +91,7 @@ class bt_node:
 
             nhpage = alloc.hpalloc()
             nhpage.min_key = tuple.pk
-            nhpage.insert(tuple)
+            nhpage.insert(tuple, ctx=ctx)
 
             btn.slots = [nhpage.id]
             btn.keys = []
@@ -104,7 +104,7 @@ class bt_node:
             btn.update_header_buffer()
             nhpage.update_header_buffer()
 
-    def insert_phase_zero(self, inode):
+    def insert_phase_zero(self, inode, ctx=None):
         target = self 
         tuple_key = _minkey(inode)
         cursor = bt_cursor()
@@ -131,7 +131,7 @@ class bt_node:
 
             if not vnode.is_overflow():
                 _info(f"direct insert new heap page{_id(inode)} to {_id(vnode)}")
-                index = vnode.direct_insert(inode)
+                index = vnode.direct_insert(inode, ctx=ctx)
                 return None, cursor, index
             
             else:
@@ -167,7 +167,7 @@ class bt_node:
         assert self.level == level
     
     @classmethod
-    def merge_split_node(cls, insert_min_key, cursor, split_node):
+    def merge_split_node(cls, insert_min_key, cursor, split_node, ctx=None):
         target = cursor.pop()
         node_type_before_split = None
 
@@ -207,10 +207,10 @@ class bt_node:
 
         return new_root_btn
 
-    def insert(self, inode):
+    def insert(self, inode, ctx=None):
         assert _ptype(self) == PAGE_TYPE_ROOT
 
-        split_node, cursor, insert_index = self.insert_phase_zero(inode)
+        split_node, cursor, insert_index = self.insert_phase_zero(inode, ctx=ctx)
         insert_min_key = _minkey(inode)
 
         if split_node is None:
@@ -274,8 +274,13 @@ class bt_node:
     
     def activate(self):
         pass
+
+    @classmethod
+    def create_xlog_btree_slot_insert(self, xid, target_page_id, new_page_id, slot_index):
+        from core.wal import XLogBtreeInsertSlotCMD, XLogBtreeInsertSlotCMDPayload
+        return XLogBtreeInsertSlotCMD(xid, XLogBtreeInsertSlotCMDPayload(target_page_id, new_page_id, slot_index))
     
-    def direct_insert(self, inode):
+    def direct_insert(self, inode, ctx=None):
         assert len(self.slots) < MAX_SLOT_COUNT
         assert len(self.slots) == len(self.keys) + 1
 
@@ -286,6 +291,9 @@ class bt_node:
 
         if _minkey(inode) < self.page.min_key:
             assert index == 0
+
+        if ctx is not None:
+            bt_node.create_xlog_btree_slot_insert(ctx.xid, _id(self), _id(inode), index)
 
         if index > 0:
             self.slots.insert(index, _id(inode))
