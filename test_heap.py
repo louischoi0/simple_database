@@ -177,6 +177,10 @@ def test_structured_tuple(app):
     read_heap_page = read_heap_page.as_heap()
     read_heap_page.activate()
 
+    for i in range(1,20):
+        assert heap.search(i) == i
+        assert read_heap_page.search(i) == i
+
     assert read_heap_page.tuple_count == heap.tuple_count
     assert heap.checksum() == read_heap_page.checksum()
     print(heap.checksum())
@@ -186,11 +190,11 @@ if __name__ == '__main__':
     app.disable_background_proc()
     app.activate()
 
-    #test_heap_page_rollback(app)
-    #test_structed_tuple2()
+    test_heap_page_rollback(app)
+    test_structed_tuple2()
     test_structured_tuple(app)
-    #test_heap_page_grow(app)
-    #test_xmin_with_ctx(app)
+    test_heap_page_grow(app)
+    test_xmin_with_ctx(app)
 
     app.cache_pool.autocommit()
     app.meta.commit_metablock()

@@ -1,9 +1,11 @@
 from core.const import *
-from core.page import is_btree_page, page, is_heap_page
+from core.page import is_btree_page, page, is_heap_page, is_btree_data_page
 from core.page_mgr import ref_page, ref_minkey
 from core.helper import _buffer, _ptype, _minkey, _id
 from core.page_mgr import global_palloc
 from core.blk import get_blk_diver
+from core.wal import xlog_full_page_write
+
 from utils.buffer_cursor import buffer_cursor
 from utils.logging import info
 
@@ -103,6 +105,17 @@ class bt_node:
             self.update_header_buffer()
             btn.update_header_buffer()
             nhpage.update_header_buffer()
+
+            if ctx is not None:
+                xlog_full_page_write(ctx.wal_writer, ctx.xid, self)
+                xlog_full_page_write(ctx.wal_writer,ctx.xid, btn)
+                xlog_full_page_write(ctx.wal_writer,ctx.xid, nhpage)
+
+                xlog0 = bt_node.create_xlog_btree_slot_insert(ctx.xid, _id(self), _id(btn), 0)
+                xlog1 = bt_node.create_xlog_btree_slot_insert(ctx.xid, _id(btn), _id(nhpage), 0)
+
+                ctx.wal_writer.write_xlog(xlog0)
+                ctx.wal_writer.write_xlog(xlog1)
 
     def insert_phase_zero(self, inode, ctx=None):
         target = self 
@@ -293,7 +306,8 @@ class bt_node:
             assert index == 0
 
         if ctx is not None:
-            bt_node.create_xlog_btree_slot_insert(ctx.xid, _id(self), _id(inode), index)
+            xlog = bt_node.create_xlog_btree_slot_insert(ctx.xid, _id(self), _id(inode), index)
+            ctx.wal_writer.write_xlog(xlog)
 
         if index > 0:
             self.slots.insert(index, _id(inode))
@@ -355,12 +369,15 @@ class bt_node:
         return len(self.slots)
     
     def ptype(self):
-        if _ptype(self) == PAGE_TYPE_ROOT:
+        page_type = _ptype(self)
+        if page_type == PAGE_TYPE_ROOT:
             return "btree root"
-        if _ptype(self) == PAGE_TYPE_INTERNAL:
+        elif page_type == PAGE_TYPE_INTERNAL:
             return "btree internal"
-        if _ptype(self) == PAGE_TYPE_DATA:
+        elif page_type == PAGE_TYPE_DATA:
             return "btree data"
+        else:
+            raise Exception(f"unknwon btree page type: {page_type}")
     
     def update_header_buffer(self):
         #assert len(self.slots) > 0
@@ -442,3 +459,19 @@ class bt_node:
         self.keys = keys
         self.slots = slots
         self.next_page_id = next_page_id
+    
+    def search(self, key) -> tuple | None:
+        target = self
+        
+        while not is_btree_data_page(target):
+            vnode_id = target.get_internal_node_to_go_down(key)
+            vnode = ref_page(vnode_id)
+            
+            vnode = bt_node.as_btnode(vnode)
+            target = vnode
+
+        found_heap_page = None 
+        heap_page = target.get_internal_node_to_go_down(key)
+
+        assert _ptype(target) == PAGE_TYPE_DATA
+        assert _ptype(heap_page) == PAGE_TYPE_HEAP

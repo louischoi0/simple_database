@@ -4,6 +4,7 @@ from utils.buffer_cursor import buffer_cursor
 from utils.dec import *
 from utils.logging import info
 from core.helper import _buffer
+from core.wal import xlog_full_page_write
 
 XFLAG_SIZE = 8
 _info = lambda msg: info("heap", msg)
@@ -144,13 +145,17 @@ class heap_page(page):
         self.deleted = []
         self.cursor = buffer_cursor(self.buffer)
         self.activated = False
+        self.next_page_id = None
     
     def read_next_page_pointer(self):
         self.cursor.at(heap_page.HEAP_NEXT_PAGE_POINTER_OFFSET)
-        return self.cursor.read_int64()
+        v = self.cursor.read_int64()
+        self.next_page_id = v
+        return v
     
     def set_next_page_pointer(self, next_page_id):
         self.cursor.at(heap_page.HEAP_NEXT_PAGE_POINTER_OFFSET)
+        self.next_page_id = next
         self.cursor.write_int64(next_page_id)
     
     def has_next(self):
@@ -271,6 +276,8 @@ class heap_page(page):
                     self.deleted.append(i)
 
             self.activated = True        
+        
+            self.read_next_page_pointer()
     
     def delete_tuple_by_index(self, index):
         pos = self.slots[index]
@@ -324,6 +331,26 @@ class heap_page(page):
         xlog = create_xlog_heap_insert_cmd(tuple_data.xmin, self.id, slot_index, tuple_data)
         wal_writer.write_xlog(xlog)
     
+    def search(self, pk):
+        page = self
+        acc = 0
+
+        with self.lock:
+            while True:
+                init = False
+                index = page.get_slot_index_by_pk(pk)
+
+                if index != -1:
+                    return index + acc
+
+                if not page.has_next():
+                    break
+
+                acc += page.tuple_count
+                page = ref_heap_page(self.next_page_id)
+        
+        return -1
+    
     def get_slot_index_by_pk(self, pk):
         cursor = buffer_cursor(_buffer(self))
 
@@ -349,13 +376,16 @@ class heap_page(page):
 
             self.delete_tuple_by_index(slot_index)
             return self.insert(new_tuple, locking=False)
-
+        
+    def empty(self):
+        return self.tuple_count == 0
+        
     def insert(self, t, ctx=None, locking=True):
         locking and self.lock.acquire()
 
         if ctx is not None:
             t.set_xmin(ctx.xid)
-
+        
         assert self.id != NULL_PAGE
 
         self.tuple_count += 1
@@ -374,7 +404,12 @@ class heap_page(page):
         self.write_tuple_data(t.size, data_buffer)
 
         self.update_header_buffer()
+
+        if self.empty() and ctx is not None:
+            xlog_full_page_write(ctx.wal_writer, ctx.xid, self)
+
         locking and self.lock.release()
+
         return slot_index
     
     def ptype(self):
@@ -443,7 +478,7 @@ def grow(alloc_func, overflow_page, t):
     overflow_page.mark_dirty_flag()
     return heap_page
 
-def insert_with_grow(alloc_func, heap_page_to_insert, t):
+def insert_with_grow(alloc_func, heap_page_to_insert, t, ctx=None):
     heap_page_to_insert.acquire_lock()
 
     next_page_id = heap_page_to_insert.read_next_page_pointer()
@@ -464,7 +499,7 @@ def insert_with_grow(alloc_func, heap_page_to_insert, t):
 
     else:
         heap_page_to_insert.release_lock()
-        heap_page_to_insert.insert(t)
+        heap_page_to_insert.insert(t, ctx=ctx)
         return heap_page_to_insert
 
 

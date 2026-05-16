@@ -1,8 +1,13 @@
 import threading
+from dataclasses import dataclass
+
+from core.meta import get_metablock
+from core.helper import _id, _buffer, _ptype
+from core.const import PAGE_SIZE
+
 from utils.buffer_cursor import buffer_cursor
 from utils.payload_codec import payload_codec
 from utils.logging import info
-from core.meta import get_metablock
 
 _info = lambda x: info("wal", x)
 
@@ -143,7 +148,9 @@ class XLogWriter:
                 buffer = xlog.ser()
                 cursor.at(self.cursor_pos)
                 cursor.write_raw(buffer)
-                _info(f"walwriter pop xlog, xid={xlog.xid}; cmd={xlog.cmd}; page={xlog.payload.page_id} lsn={xlog.lsn}; length={len(buffer)}; start={self.cursor_pos}")
+
+                _info(f"walwriter pop xlog, xid={xlog.xid}; cmd={xlog.cmd}; lsn={xlog.lsn}; length={len(buffer)}; start={self.cursor_pos}")
+
                 self.set_cursor_pos(cursor)
     
     def set_cursor_pos(self, cursor):
@@ -158,7 +165,6 @@ class XLogWriter:
             sleep(1)
 
 class XLogCheckpointer:
-
     def __init__(self, blk, begin, end, committed):
         self.begin_lsn = begin
         self.end_lsn = end
@@ -172,6 +178,17 @@ class XLogCheckpointer:
     def init(self):
         # TODO same as wal writer
         self.cursor_pos = get_metablock().get_value("last_committed_wal_seg_pos")
+    
+    def read_from(self, start_lsn, end_lsn=None):
+        # for debugging
+        with buffer_cursor.from_file(self.current_wal_seg_file, WAL_SEGMENT_SIZE) as cursor:
+            while True:
+                xlog_buffer, length = cursor.read_raw()
+                if xlog_buffer is None or len(xlog_buffer) == 0:
+                    return
+                assert len(xlog_buffer) == length
+                xlog = XLog.decode(xlog_buffer)
+                print(xlog)
 
     def iter_xlog(self):
         with WAL_SEGMENT_LOCK:
@@ -228,6 +245,9 @@ class XLog:
         self.prev_lsn = prev_lsn
         self.lsn = lsn
         self.payload = payload
+
+    def __repr__(self):
+        return f"xid={self.xid}; cmd={self.cmd}; lsn={self.lsn}; payload={self.payload}"
     
     def set_lsn(self, lsn):
         self.lsn = lsn
@@ -276,17 +296,26 @@ class XLog:
     def parse_xlog_payload(cls, cmd, payload_buffer):
         if cmd == "hinsertx":
             return XLogHeapInsertPayload.decode(payload_buffer)
+        elif cmd == "fullpgwr":
+            return XLogFullPageWriteCMDPayload.decode(payload_buffer)
+        elif cmd == "binserth":
+            return XLogBtreeInsertSlotCMDPayload.decode(payload_buffer)
         else:
             raise Exception(f"unknown xlog cmd type: {cmd}")
 
 def create_xlog_heap_insert_cmd(xid, page_id, slot_index, tuple):
     return XLogHeapInsertCMD(xid, XLogHeapInsertPayload(page_id, slot_index, tuple.ser()))
 
+@dataclass
 class XLogHeapInsertPayload:
     def __init__(self, page_id, slot_index, tuple_buffer):
         self.page_id = page_id
         self.slot_index = slot_index
         self.tuple_buffer = tuple_buffer
+    
+    def __repr__(self):
+        from core.heap import HeapTuple
+        return f"( page_id={self.page_id}; slot_index={self.slot_index}; tuple_buffer_len={len(self.tuple_buffer)}; pk={HeapTuple.get_pk_from_buffer(self.tuple_buffer)} )"
     
     def ser(self):
         cursor = buffer_cursor()
@@ -305,17 +334,22 @@ class XLogHeapInsertPayload:
 
         return XLogHeapInsertPayload(page_id, slot_index, buffer)
 
+@dataclass
 class XLogBtreeInsertSlotCMDPayload:
     def __init__(self, target_page_id, new_page_id, slot_index):
         self.target_page_id = target_page_id
         self.new_page_id = new_page_id
         self.slot_index = slot_index
     
+    def __repr__(self):
+        return f"( target_page_id={self.target_page_id}; new_page_id={self.new_page_id}; slot_index={self.slot_index}; )"
+    
     def ser(self):
         cursor = buffer_cursor()
         cursor.write_int64_a(self.target_page_id)
         cursor.write_int64_a(self.new_page_id)
         cursor.write_int64_a(self.slot_index)
+        return cursor.buffer
 
     @classmethod
     def decode(cls, buffer):
@@ -327,14 +361,17 @@ class XLogBtreeInsertSlotCMDPayload:
 
         return XLogBtreeInsertSlotCMDPayload(target_page_id, new_page_id, slot_index)
 
+@dataclass
 class XLogBtreeInsertSlotCMD(XLog):
     def __init__(self, xid, payload: XLogBtreeInsertSlotCMDPayload):
         super(XLogBtreeInsertSlotCMD, self).__init__(xid, "binserth", payload)
 
+@dataclass
 class XLogHeapInsertCMD(XLog):
     def __init__(self, xid, payload: XLogHeapInsertPayload):
         super(XLogHeapInsertCMD, self).__init__(xid, "hinsertx", payload)
 
+@dataclass
 class XLogBeginTransactionPayload:
     def __init__(self, xid):
         self.xid = xid
@@ -350,6 +387,45 @@ class XLogBeginTransactionPayload:
         xid = cursor.read_int64()
         return XLogBeginTransactionPayload(xid)
 
+@dataclass
+class XLogFullPageWriteCMDPayload:
+    def __init__(self, page_id, page_type, page_buffer):
+        self.page_id = page_id
+        self.page_type = page_type
+        self.page_buffer = page_buffer
+    
+    def __repr__(self):
+        return f"( page_id={self.page_id}; page_type={self.page_type}; size={len(self.page_buffer)} )"
+
+    def ser(self):
+        cursor = buffer_cursor()
+        cursor.write_int64_a(self.page_id)
+        cursor.write_int64_a(self.page_type)
+        assert len(self.page_buffer) == PAGE_SIZE
+
+        cursor.write_raw_a(self.page_buffer)
+        return cursor.buffer
+    
+    @classmethod
+    def decode(cls, buffer):
+        cursor = buffer_cursor(buffer)
+
+        page_id = cursor.read_int64()
+        page_type = cursor.read_int64()
+        page_buffer = cursor.read(PAGE_SIZE)
+
+        return XLogFullPageWriteCMDPayload(page_id, page_type, page_buffer)
+
+@dataclass
+class XLogFullPageWriteCMD(XLog):
+    def __init__(self, xid, payload: XLogFullPageWriteCMDPayload):
+        super(XLogFullPageWriteCMD, self).__init__(xid, "fullpgwr", payload)
+    
+def xlog_full_page_write(wal_writer: XLogWriter, xid, page):
+    xlog = XLogFullPageWriteCMD(xid, XLogFullPageWriteCMDPayload(_id(page), _ptype(page), _buffer(page)))
+    wal_writer.write_xlog(xlog)
+
+@dataclass
 class XLogBeginTransactionCMD(XLog):
     def __init__(self, xid):
         super(XLogBeginTransactionCMD, self).__init__(xid, "0begintx", XLogBeginTransactionPayload(self.xid))

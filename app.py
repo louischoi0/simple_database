@@ -19,6 +19,7 @@ simple_schema = Schema([
 ])
 
 blk = None
+ENABLE_WAL_SYSTEM = True
 
 def get_test_keys():
     keys = [ 1,2,3,4,5,6,7,8,9,10 ]
@@ -125,12 +126,12 @@ def exec_command(cmd):
         from core.meta import get_metablock
         _init_meta_system(blk)
         get_metablock().bootstrap()
-        app.cache_pool.autocommit()
+        #app.cache_pool.autocommit()
         exit(0)
         return None
 
     elif ctype == "bootstrap":
-        app = bootstrap_main(False)
+        app = bootstrap_main(ENABLE_WAL_SYSTEM)
         from core.catalog import bootstrap_catalog_sys_types, bootstrap_catalog_sys_objects, bootstrap_catalog_sys_tables, bootstrap_catalog_sys_columns
 
         bootstrap_catalog_sys_types(app.alloc)
@@ -145,7 +146,7 @@ def exec_command(cmd):
         exit(0)
     
     elif ctype == "new_root":
-        app = bootstrap_main(False)
+        app = bootstrap_main(ENABLE_WAL_SYSTEM)
         
         min_key = int(cmd[1])
         root_page = new_root_page(app, app.alloc, min_key)
@@ -156,7 +157,7 @@ def exec_command(cmd):
         app.blk.write_page(root_page.page)
     
     elif ctype == "set_desc_pg_id":
-        app = bootstrap_main(False)
+        app = bootstrap_main(ENABLE_WAL_SYSTEM)
         table_oid = int(cmd[1])
         new_desc_pg_id = int(cmd[2])
 
@@ -164,7 +165,7 @@ def exec_command(cmd):
         raw_update_sys_tables_table_desc(table_oid, new_desc_pg_id)
     
     elif ctype == "insert_bt":
-        app = bootstrap_main(False)
+        app = bootstrap_main(ENABLE_WAL_SYSTEM)
         root_page_id = int(cmd[1])
         new_key = int(cmd[2])
         table_oid = 4001
@@ -214,6 +215,11 @@ def exec_command(cmd):
         h.tuple_count = 2
         buffer = h.ser_header()
         a, b, c, d = heap_page.parse_header_buffer(buffer)
+    
+    elif ctype == "read_wal":
+        set_log_disable()
+        app = bootstrap_main(False) 
+        app.wal_checkpointer.read_from(0, 0)
 
     elif ctype == "new_heap":
         app = bootstrap_main(False)
@@ -221,15 +227,16 @@ def exec_command(cmd):
         app.blk.write_page(h)
     
     elif ctype == "bt_insert_tp": 
-        new_key = int(cmd[1])
-        app = bootstrap_main(False)
+        table_oid = int(cmd[1])
+        new_key = int(cmd[2])
+        app = bootstrap_main(ENABLE_WAL_SYSTEM)
 
         from core.executor import init_insert, QueryExecutionCtx
         d0 = { "student_id": new_key, "name": "louis", "grade": 3}
         ctx = QueryExecutionCtx(1, app.alloc, app.wal_writer)
         from core.catalog import get_sys_namespace
 
-        insert_query_state = init_insert(get_public_namespace(), 4001, d0)
+        insert_query_state = init_insert(get_public_namespace(), table_oid, d0)
         insert_query_state.exec(ctx)
     
     elif ctype == "select_heap":
@@ -246,7 +253,7 @@ def exec_command(cmd):
             print(data)
 
     elif ctype == "insert":
-        app = bootstrap_main(False)
+        app = bootstrap_main(ENABLE_WAL_SYSTEM)
         page_id = int(cmd[1])
         value = int(cmd[2])
 
@@ -280,6 +287,7 @@ def exec_command(cmd):
         from core.catalog import create_table
         table_oid = create_table(app.alloc, get_public_namespace(), "students", schema=test_table_schema, clustered_type="btree")
         print(table_oid)
+        app.cache_pool.autocommit()
     
     elif ctype == "iter":
         app = bootstrap_main(False)
@@ -319,4 +327,6 @@ if __name__ == "__main__":
 
     if sys.argv[1] != "init":
         app.meta.commit_metablock()
-        #app.cache_pool.autocommit()
+
+        if not ENABLE_WAL_SYSTEM:
+            app.cache_pool.autocommit()

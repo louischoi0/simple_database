@@ -23,6 +23,7 @@ global WAITS
 WAITS = {}
 
 def _init_lock_system():
+    return
     global MEM_POOL
     _info("init lock management system")
     MEM_POOL = shared_memory.SharedMemory("lock_mem_pool", create=True, size=MEM_POOL_SIZE)

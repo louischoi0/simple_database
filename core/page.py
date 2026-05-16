@@ -17,6 +17,12 @@ def is_heap_page(page):
         return page.page.type == PAGE_TYPE_HEAP
     else:
         return page.type == PAGE_TYPE_HEAP
+
+def is_btree_data_page(page):
+    if hasattr(page, "page"):
+        return page.page.type == PAGE_TYPE_DATA
+    else:
+        return page.type == PAGE_TYPE_DATA
     
 def is_btree_page(page):
     if hasattr(page, "page"):
