@@ -372,6 +372,11 @@ class XLogHeapInsertCMD(XLog):
         super(XLogHeapInsertCMD, self).__init__(xid, "hinsertx", payload)
 
 @dataclass
+class XLogBeginTransactionCMD(XLog):
+    def __init__(self, xid):
+        super(XLogBeginTransactionCMD, self).__init__(xid, "0begintx", XLogBeginTransactionPayload(self.xid))
+
+@dataclass
 class XLogBeginTransactionPayload:
     def __init__(self, xid):
         self.xid = xid
@@ -386,6 +391,37 @@ class XLogBeginTransactionPayload:
         cursor = buffer_cursor(buffer)
         xid = cursor.read_int64()
         return XLogBeginTransactionPayload(xid)
+
+def xlog_begin_transaction(wal_writer, xid):
+    xlog = XLogBeginTransactionCMD(xid)
+    wal_writer.write_xlog(xlog)
+    return xlog.lsn
+
+def xlog_commit_transaction(wal_writer, xid):
+    xlog = XLogCommitTransactionCMD(xid)
+    wal_writer.write_xlog(xlog)
+    return xlog.lsn
+    
+@dataclass
+class XLogCommitTransactionCMD(XLog):
+    def __init__(self, xid):
+        super(XLogCommitTransactionCMD, self).__init__(xid, "committx", XLogCommitTransactionCMD(self.xid))
+
+@dataclass
+class XLogCommitTransactionPayload:
+    def __init__(self, xid):
+        self.xid = xid
+    
+    def ser(self):
+        cursor = buffer_cursor()
+        cursor.write_int64_a(self.xid)
+        return cursor.buffer
+
+    @classmethod 
+    def decode(cls, buffer):
+        cursor = buffer_cursor(buffer)
+        xid = cursor.read_int64()
+        return XLogCommitTransactionCMD(xid)
 
 @dataclass
 class XLogFullPageWriteCMDPayload:
@@ -425,10 +461,6 @@ def xlog_full_page_write(wal_writer: XLogWriter, xid, page):
     xlog = XLogFullPageWriteCMD(xid, XLogFullPageWriteCMDPayload(_id(page), _ptype(page), _buffer(page)))
     wal_writer.write_xlog(xlog)
 
-@dataclass
-class XLogBeginTransactionCMD(XLog):
-    def __init__(self, xid):
-        super(XLogBeginTransactionCMD, self).__init__(xid, "0begintx", XLogBeginTransactionPayload(self.xid))
 
 def _init_wal_system(blk, metablock):
     global g_xlog_writer

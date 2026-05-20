@@ -23,6 +23,7 @@ class metablock:
         self.checkpointer_lsn_committed = None
         self.meta_page = None
         self.current_wal_seg_file = None
+        self.oldest_xid = None
 
         self.lock = threading.Lock()
         self.write_lock = threading.Lock()
@@ -52,6 +53,8 @@ class metablock:
         self.current_wal_seg_file = cursor.read_char(16)
         self.last_committed_wal_seg_file = cursor.read_char(16)
         self.last_committed_wal_seg_pos = cursor.read_int64()
+
+        self.oldest_xid = cursor.read_int64()
 
         _info(f"metablock loaded: {self}")
     
@@ -133,6 +136,15 @@ class metablock:
             cursor = buffer_cursor(self.meta_page.buffer)
             cursor.at(offset)
             cursor.write_int64(pos)
+            self.commit_metablock()
+    
+    def set_oldest_xid_with_commit(self, pos):
+        with self.lock:
+            xid = self.oldest_xid
+            offset = PAGE_HDR_SIZE + 72
+            cursor = buffer_cursor(self.meta_page.buffer)
+            cursor.at(offset)
+            cursor.write_int64(xid)
             self.commit_metablock()
     
     def get_value(self, key):

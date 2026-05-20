@@ -32,6 +32,12 @@ class HeapTuple:
         cursor = buffer_cursor(buffer)
         cursor.at(HeapTuple.HEAP_TUPLE_HEADER_SIZE)
         return cursor.read_int64()
+    
+    @classmethod
+    def get_minmax_from_buffer(cls, buffer):
+        cursor = buffer_cursor(buffer)
+        cursor.at(8)
+        return cursor.read_int64(), cursor.read_int64()
 
 class StructuredTuple(HeapTuple):
     def __init__(self, buffer):
@@ -147,6 +153,7 @@ class heap_page(page):
         self.activated = False
         self.next_page_id = None
     
+    
     def read_next_page_pointer(self):
         self.cursor.at(heap_page.HEAP_NEXT_PAGE_POINTER_OFFSET)
         v = self.cursor.read_int64()
@@ -184,30 +191,6 @@ class heap_page(page):
         self.slots.append(self.slot_cursor)
         return len(self.slots) - 1
     
-    def raw_get(self, pk):
-        cursor = self.cursor
-        res = []
-
-        for index, tuple_pos in enumerate(self.slots):
-            if index in self.deleted:
-                continue 
-
-            cursor.at(tuple_pos)
-            size = cursor.read_int64()
-
-            assert size > 0
-            
-            cursor.at(tuple_pos)
-            buffer = cursor.read(size)
-            ncursor = buffer_cursor(buffer)
-            ncursor.at(HeapTuple.HEAP_TUPLE_HEADER_SIZE)
-            _pk = ncursor.read_int64()
-
-            if _pk == pk:
-                return buffer
-
-        return None
-    
     def raw_filter(self, f, raw_filter_func):
         cursor = self.cursor
         res = []
@@ -229,7 +212,7 @@ class heap_page(page):
 
         return res
     
-    def raw_map(self, f):
+    def raw_map(self, f, ctx=None):
         cursor = self.cursor
         res = []
         for index, tuple_pos in enumerate(self.slots):
@@ -241,12 +224,21 @@ class heap_page(page):
 
             assert size > 0
             cursor.at(tuple_pos)
+
             buffer = cursor.read(size)
+
+            if ctx is not None and not heap_page.is_visible(ctx, buffer):
+                continue 
 
             res.append(f(buffer))
 
         return res
     
+    @classmethod
+    def is_visible(cls, ctx, tuple_buffer):
+        xmin, xmax = HeapTuple.get_minmax_from_buffer(tuple_buffer)
+        return xmin <= ctx.xid < xmax
+
     def load_slots_from_buffer(self):
         cursor = self.cursor
         cursor.at(heap_page.SLOT_SEGMENT_OFFSET)
@@ -276,7 +268,6 @@ class heap_page(page):
                     self.deleted.append(i)
 
             self.activated = True        
-        
             self.read_next_page_pointer()
     
     def delete_tuple_by_index(self, index):
@@ -330,13 +321,41 @@ class heap_page(page):
         from core.wal import create_xlog_heap_insert_cmd
         xlog = create_xlog_heap_insert_cmd(tuple_data.xmin, self.id, slot_index, tuple_data)
         wal_writer.write_xlog(xlog)
+
+    def raw_get(self, pk):
+        page = self
+        from core.page_mgr import ref_heap_page
+
+        while True:
+            with page.lock:
+                init = False
+                index = page.get_slot_index_by_pk(pk)
+
+                if index != -1:
+                    cursor = buffer_cursor(page.buffer)
+                    pos = page.slots[index]
+
+                    cursor.at(pos)
+                    size = cursor.read_int64()
+                    cursor.at(pos)
+
+                    return cursor.read(size)
+
+                if not page.has_next():
+                    break
+
+                acc += page.tuple_count
+            page = ref_heap_page(self.next_page_id)
+        
+        return None
     
     def search(self, pk):
         page = self
         acc = 0
+        from core.page_mgr import ref_heap_page
 
-        with self.lock:
-            while True:
+        while True:
+            with page.lock:
                 init = False
                 index = page.get_slot_index_by_pk(pk)
 
@@ -347,7 +366,7 @@ class heap_page(page):
                     break
 
                 acc += page.tuple_count
-                page = ref_heap_page(self.next_page_id)
+            page = ref_heap_page(self.next_page_id)
         
         return -1
     

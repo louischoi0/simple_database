@@ -223,6 +223,9 @@ class bt_node:
     def insert(self, inode, ctx=None):
         assert _ptype(self) == PAGE_TYPE_ROOT
 
+        if self.empty():
+            raise Exception("empty root page must be initailized with inserting tuple key not heap page.")
+
         split_node, cursor, insert_index = self.insert_phase_zero(inode, ctx=ctx)
         insert_min_key = _minkey(inode)
 
@@ -460,7 +463,7 @@ class bt_node:
         self.slots = slots
         self.next_page_id = next_page_id
     
-    def search(self, key) -> tuple | None:
+    def search(self, key) -> bytearray| None:
         target = self
         
         while not is_btree_data_page(target):
@@ -475,3 +478,5 @@ class bt_node:
 
         assert _ptype(target) == PAGE_TYPE_DATA
         assert _ptype(heap_page) == PAGE_TYPE_HEAP
+
+        return heap.raw_get(key)
