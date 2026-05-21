@@ -470,8 +470,9 @@ class bt_node:
             vnode = bt_node.as_btnode(vnode)
             target = vnode
 
-        found_heap_page = None 
         heap_page = target.get_internal_node_to_go_down(key)
 
         assert _ptype(target) == PAGE_TYPE_DATA
         assert _ptype(heap_page) == PAGE_TYPE_HEAP
+
+        return heap_page.search(key)

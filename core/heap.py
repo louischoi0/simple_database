@@ -329,9 +329,13 @@ class heap_page(page):
     def before_write_data(self, wal_writer, slot_index, tuple_data):
         from core.wal import create_xlog_heap_insert_cmd
         xlog = create_xlog_heap_insert_cmd(tuple_data.xmin, self.id, slot_index, tuple_data)
+
+
         wal_writer.write_xlog(xlog)
     
     def search(self, pk):
+        from core.page_mgr import ref_heap_page
+
         page = self
         acc = 0
 
