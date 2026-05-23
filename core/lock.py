@@ -28,8 +28,8 @@ def _init_lock_system():
     _info("init lock management system")
     MEM_POOL = shared_memory.SharedMemory("lock_mem_pool", create=True, size=MEM_POOL_SIZE)
 
-class Lock:
-    def __init__(self, oid, mode, pid, query=""):
+class ObjectLock:
+    def __init__(self, oid, mode, pid="", query=""):
         self.oid = oid
         self.mode = mode
         self.pid = pid
@@ -57,7 +57,7 @@ class Lock:
                 return res
             else:
                 from time import sleep
-                sleep(0.05)
+                sleep(0.01)
 
     def release(self):
         with MEM_POOL_LOCK:    

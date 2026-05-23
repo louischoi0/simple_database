@@ -8,7 +8,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from core.executor import QueryExecutionCtx, BtreePageExpandState, init_insert
+from core.executor import QueryExecutionCtx, BtreePageExpandState, init_insert, BtreePageScanState
 from core.tx import generate_xid
 from core.catalog import get_public_namespace
 from utils.logging import info
@@ -45,32 +45,52 @@ def create_new_ctx(app) -> QueryExecutionCtx:
 
 #def begin_transaction(ctx) ->
 
-async def execute_query(app, command: str, payload: dict[str, Any]) -> WorkerResult:
+def command_callback(app):
+    app.cache_pool.autocommit()
+
+async def execute_command(app, command: str, payload: dict[str, Any]) -> WorkerResult:
     if command == "ping":
         return WorkerResult(request_id="", status="ok", data={"pong": True})
     
     elif command == "bt_tuple_insert":
         ctx = create_new_ctx(app) 
 
-        insert_query_state = init_insert(get_public_namespace(), payload["table_oid"], payload["data"])
-        insert_query_state.exec(ctx)
+        execution = init_insert(get_public_namespace(), payload["table_oid"], payload["data"])
+        execution.exec(ctx)
+        execution.on_finisehd()
+
+        command_callback(app)
+        return WorkerResult(request_id="", status="ok", data={})
     
     elif command == "bt_new_heap_page":
         ctx = create_new_ctx(app) 
 
-        table_access = init_table_access(get_public_namespace(), payload["table_oid"], lockmode=None)
+        table_access = init_table_access(get_public_namespace(), payload["table_oid"], lockmode=2)
         execution = BtreePageExpandState(table_access, table_access.desc_pg_id, payload["new_min_key"])
         execution.exec(ctx)
+        execution.on_finisehd()
 
-    if command == "query":
-        sql = payload.get("sql", "")
-        _info("Executing SQL: %s", sql)
+        command_callback(app)
+        return WorkerResult(request_id="", status="ok", data={})
+    
+    elif command == "select":
+        ctx = create_new_ctx(app)
 
-        return WorkerResult(
-            request_id="",
-            status="ok",
-            data={"rows": [], "sql": sql, "note": "stub result"},
-        )
+        table_access = init_table_access(get_public_namespace(), payload["table_oid"], lockmode=1)
+        execution = BtreePageScanState(table_access)
+
+        execution.exec(ctx)
+        execution.on_finisehd()
+
+        data = list( x.struct(table_access.schema) for x in  execution.result )
+        return WorkerResult(request_id="", status="ok", data=data)
+    
+    elif command == "create_index":
+        ctx = create_new_ctx(app)
+        table_access = init_table_access(get_public_namespace(), payload["table_oid"], lockmode=2)
+
+        command_callback(app)
+        return WorkerResult(request_id="", status="ok", data={})
 
     return WorkerResult(
         request_id="",
@@ -105,7 +125,7 @@ class Worker:
             _info("Worker %d handling request %s", self.worker_id, request.request_id)
 
             try:
-                result = await execute_query(self.app, request.command, request.payload)
+                result = await execute_command(self.app, request.command, request.payload)
                 result.request_id = request.request_id
 
                 if not request.future.done():

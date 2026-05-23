@@ -35,8 +35,6 @@ class TransactionManager:
         lsn = xlog_begin_transaction(xact.xid)
         xact.begin_lsn = xact.xid
 
-        return xact
-
     def commit(self, xid):
         xact = Transaction()
         xact.xid = self.create_xid()

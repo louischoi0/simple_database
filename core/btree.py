@@ -479,4 +479,4 @@ class bt_node:
         assert _ptype(target) == PAGE_TYPE_DATA
         assert _ptype(heap_page) == PAGE_TYPE_HEAP
 
-        return heap.raw_get(key)
+        return heap_page.raw_get(key)

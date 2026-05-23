@@ -213,8 +213,22 @@ class heap_page(page):
         return res
     
     def raw_map(self, f, ctx=None):
+        res = self._raw_map(f, ctx)
+        ref_page = self
+        from core.page_mgr import ref_heap_page
+
+        while ref_page.has_next():
+            ref_page = ref_heap_page(ref_page.next_page_id)
+            res.extend(ref_page._raw_map(f, ctx))
+        
+        return list(x[1] for x in res)
+    
+    def _raw_map(self, f, ctx=None):
         cursor = self.cursor
         res = []
+
+        print(self.id, len(self.slots))
+        
         for index, tuple_pos in enumerate(self.slots):
             if index in self.deleted:
                 continue 
@@ -230,13 +244,15 @@ class heap_page(page):
             if ctx is not None and not heap_page.is_visible(ctx, buffer):
                 continue 
 
-            res.append(f(buffer))
+            res.append( ( HeapTuple.get_pk_from_buffer(buffer), f(buffer) ) )
 
-        return res
+        return sorted(res, key=lambda x: x[0])
     
     @classmethod
     def is_visible(cls, ctx, tuple_buffer):
         xmin, xmax = HeapTuple.get_minmax_from_buffer(tuple_buffer)
+        if xmax == 0:
+            return xmin <= ctx.xid
         return xmin <= ctx.xid < xmax
 
     def load_slots_from_buffer(self):

@@ -194,7 +194,7 @@ class metablock:
         return self.next_page
 
     def commit_metablock(self):
-        _info(f"commit metablodk: {self}")
+        #_info(f"commit metablodk: {self}")
         self.blkdev.write_page(self.meta_page)
 
 def get_metablock():

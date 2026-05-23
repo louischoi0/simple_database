@@ -4,6 +4,7 @@ from core.const import *
 from core.heap import StructuredTuple, insert_with_grow
 from utils.logging import info
 from core.helper import _id
+from core.lock import ObjectLock
 
 _info = lambda x: info("catalog", x)
 
@@ -491,6 +492,23 @@ def insert_catalog_sys_columns(heap_page, schema: Schema):
         t = StructuredTuple.load(sys_columns_schema, column_tuple)
         heap_page = insert_with_grow(global_hpalloc, heap_page, t)
 
+def create_index(allocator, namespace, table_oid, target_column):
+    object_hpage = ref_heap_page(get_sys_table_desc("objects"))
+    new_index_oid = generate_user_oid()
+
+    object = {
+        "oid": new_index_oid,
+        "namespace": namespace.value,
+        "obj_type": get_type_val("table"),
+        "name": f"index_{target_column}_" + table_oid,
+    }
+
+    object_tuple = StructuredTuple.load(sys_objects_schema, object)
+    object_tuple.struct(sys_objects_schema)
+    insert_catalog_sys_object(object_hpage, object_tuple)
+
+    return new_index_oid
+
 def create_table(allocator, namespace, name, schema, clustered_type="heap"):
     object_hpage = ref_heap_page(get_sys_table_desc("objects"))
     column_hpage = ref_heap_page(get_sys_table_desc("columns"))
@@ -525,6 +543,7 @@ def create_table(allocator, namespace, name, schema, clustered_type="heap"):
         "desc_page_id": _id(table_pg),
         "clustered_type": clustered_type,
     }
+
     table_tuple = StructuredTuple.load(sys_tables_schema, table)
     table_tuple.struct(sys_tables_schema)
 
@@ -610,12 +629,13 @@ def read_sys_columns_tuples():
     return types
 
 class TableAccess:
-    def __init__(self, namespace, oid, schema, desc_pg_id, clustered_type, lockmode=None):
+    def __init__(self, namespace, oid, schema, desc_pg_id, clustered_type, obj_lock=None):
         self.namespace = namespace
         self.oid = oid
         self.schema = schema
         self.desc_pg_id = desc_pg_id
         self.clustered_type = clustered_type
+        self.obj_lock = None
 
 def raw_get_sys_tables(oid):
     page_heap = ref_heap_page(get_sys_table_desc("tables"))
@@ -653,6 +673,11 @@ def raw_build_schema_from_sys_columns(oid):
     return schema
 
 def init_table_access(namespace, oid, lockmode=None):
+    if lockmode is not None:
+        obj_lock = ObjectLock(oid, lockmode) 
+    else:
+        obj_lock = None
+
     if is_sys_namespace(namespace):
         schema = get_table_schema_from_cache(oid)
         assert schema is not None
@@ -664,7 +689,7 @@ def init_table_access(namespace, oid, lockmode=None):
         clustered_type = table_row["clustered_type"]
         schema = raw_build_schema_from_sys_columns(oid)
 
-    return TableAccess(namespace, oid, schema, desc_pg_id=desc, clustered_type=clustered_type, lockmode=lockmode)
+    return TableAccess(namespace, oid, schema, desc_pg_id=desc, clustered_type=clustered_type, obj_lock=obj_lock)
 
 def is_table_clustered_heap(table_access):
     return table_access.clustered_type == "heap"
