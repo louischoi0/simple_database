@@ -77,7 +77,7 @@ async def scenario_zero():
         print(res)
         """
 
-        for i in range(1, 70):
+        for i in range(20, 200):
             request = create_request__bt_insert_tuple(4001, i)
             res = await send_request(ws, request)
             print(res)
@@ -91,8 +91,8 @@ async def main():
 
 if __name__ == "__main__":
     #asyncio.run(insert_tp())
-    #asyncio.run(scenario_zero())
+    asyncio.run(scenario_zero())
     #asyncio.run(select())
     #asyncio.run(create_index())
-    #asyncio.run(scan_index(217))
-    asyncio.run(i_select(217, 4001))
+    #asyncio.run(scan_index(223))
+    #asyncio.run(i_select(223, 4001))

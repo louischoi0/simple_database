@@ -198,6 +198,7 @@ type_column = SysObject(19, obj_sys_namespace, "type_column", type_type, value=8
 type_page = SysObject(20, obj_sys_namespace, "type_page", type_type, value=9, value_is_null=False, value_type=type_int)
 type_table = SysObject(21, obj_sys_namespace, "type_table", type_type, value=10, value_is_null=False, value_type=type_int)
 type_operator = SysObject(22, obj_sys_namespace, "type_operator", type_type, value=11, value_is_null=False, value_type=type_int)
+type_index = SysObject(23, obj_sys_namespace, "type_index", type_type, value=12, value_is_null=False, value_type=type_int)
 
 obj_sys_namespace.type = type_namespace
 obj_sys_namespace.value_type = type_int
@@ -208,6 +209,7 @@ obj_public_namespace.value_type = type_int
 TYPES = {
   "type_page": type_page,
   "type_table": type_table,
+  "type_index": type_index,
   "type_namespace": type_namespace,
 
   "type_column": type_column,
@@ -498,15 +500,15 @@ def insert_catalog_sys_columns(heap_page, schema: Schema):
         t = StructuredTuple.load(sys_columns_schema, column_tuple)
         heap_page = insert_with_grow(global_hpalloc, heap_page, t)
 
-def create_index(allocator, namespace, table_oid, target_column):
+def create_index(allocator, namespace, table_oid, target_col):
     object_hpage = ref_heap_page(get_sys_table_desc("objects"))
     new_index_oid = generate_user_oid()
 
     object = {
         "oid": new_index_oid,
         "namespace": namespace.value,
-        "obj_type": get_type_val("table"),
-        "name": f"index_{target_column}_" + table_oid,
+        "obj_type": get_type_val("index"),
+        "name": f"index_{target_col}_{table_oid}",
     }
 
     object_tuple = StructuredTuple.load(sys_objects_schema, object)

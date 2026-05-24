@@ -2,7 +2,7 @@ from core.const import *
 from core.page import is_btree_page, page, is_heap_page, is_btree_data_page
 from core.page_mgr import ref_page, ref_minkey
 from core.helper import _buffer, _ptype, _minkey, _id
-from core.page_mgr import global_palloc
+from core.page_mgr import global_palloc, ref_heap_page
 from core.blk import get_blk_diver
 from core.wal import xlog_full_page_write
 
@@ -344,13 +344,7 @@ class bt_node:
         return index
     
     def get_internal_node_idx_to_go_down(self, tuple_key):
-        print(self.slots)
-        print(self.keys)
-        print(tuple_key)
-        print(self.key_count)
-
         for i, k in enumerate(self.keys):
-            print("i: ", i)
             if tuple_key < k:
                 return i
         return len(self.slots) - 1
@@ -481,7 +475,8 @@ class bt_node:
             vnode = bt_node.as_btnode(vnode)
             target = vnode
 
-        heap_page = target.get_internal_node_to_go_down(key)
+        heap_page_id = target.get_internal_node_to_go_down(key)
+        heap_page = ref_heap_page(heap_page_id)
 
         assert _ptype(target) == PAGE_TYPE_DATA
         assert _ptype(heap_page) == PAGE_TYPE_HEAP

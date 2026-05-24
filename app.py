@@ -269,6 +269,14 @@ def exec_command(cmd):
 
         hpage.insert(HeapTuple(value))
         app.blk.write_page(hpage)
+
+    elif ctype == "objects":
+        set_log_disable()
+        app = bootstrap_main(False)
+        from core.catalog import read_sys_table
+        tuples = read_sys_table("objects")
+        for t in tuples:
+            print(t)
     
     elif ctype == "tables":
         set_log_disable()

@@ -12,7 +12,7 @@ from core.btree import bt_node, bt_cursor
 from dataclasses import dataclass
 from utils.logging import info
 
-_info = lambda x: info("executor", x)
+_info = lambda *x: info("executor", *x)
 IndexValueCol = sys_int64_index_schema.col_map["value"]
 
 NO_ERR = 0
@@ -154,10 +154,12 @@ class BtreePageGetTupleState(QueryExecState):
     def exec(self, ctx: QueryExecutionCtx):
         assert is_table_clustered_btree(self.table_access)
 
-        print("btree page get tuple: ", self.table_access.desc_pg_id)
+        _info(f"btree page get tuple #{self.pk}: ", self.table_access.desc_pg_id)
 
         btree_root_page: bt_node = ref_btree_page(self.table_access.desc_pg_id)
-        self.result = btree_root_page.search(self.pk)
+        _res = btree_root_page.search(self.pk)
+
+        self.set_result( StructuredTuple.parse(_res, self.table_access.schema) )
 
         return NO_ERR
 
@@ -219,8 +221,6 @@ class BuildIndexState(QueryExecState):
         for idx, heap_page in enumerate(heap_pages[1:]):
             btree_root = btree_root.insert(heap_page)
 
-# Equal(IndexValueCol, 6)
-        
 class BtreeIndexPageScanState(QueryExecState):
     def __init__(self, table_access, index_entry_pg_id, predicate):
         super(BtreeIndexPageScanState, self).__init__(table_access)
@@ -234,14 +234,12 @@ class BtreeIndexPageScanState(QueryExecState):
         res = []
 
         for t in index_scan_execution.result:
-            _exec = BtreePageGetTupleState(self.table_access, t.pk)
+            _exec = BtreePageGetTupleState(self.table_access, t.get("key"))
             _exec.exec(ctx)
 
             if _exec.result is not None:
                 res.append(_exec.result)
-            print(t)
         
-        print("here: ", res)
         self.set_result(res)
         return NO_ERR
 
@@ -268,7 +266,6 @@ class BtreePageScanState(QueryExecState):
             if self.func is not None:
                 data = map(self.func, data)
 
-            _info(f"collected data from heap page: {data}")
             return data
 
         def visit_node(parent, node_page_id):
@@ -281,7 +278,6 @@ class BtreePageScanState(QueryExecState):
                 node = node.as_heap()
                 node.activate()
                 _info(f"collect heap page: {_id(node)}")
-
                 return res.extend( scan_heap_page(node) )
 
             node = bt_node.as_btnode(node)

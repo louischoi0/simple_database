@@ -13,7 +13,7 @@ from core.executor import BtreeIndexPageScanState
 from core.tx import generate_xid
 from core.catalog import get_public_namespace, init_scan_index
 from utils.logging import info
-from core.catalog import init_table_access
+from core.catalog import init_table_access, create_index
 import traceback
 
 import websockets
@@ -94,13 +94,11 @@ async def execute_command(app, command: str, payload: dict[str, Any]) -> WorkerR
 
         from core.executor import Equal, IndexValueCol
 
-        execution = BtreeIndexPageScanState(table_access, index_entry_pg_id=217, predicate=Equal(IndexValueCol, 4))
+        execution = BtreeIndexPageScanState(table_access, table_access.index_entry_pg_id, predicate=Equal(IndexValueCol, 4))
         execution.exec(ctx)
         execution.on_finished()
 
-        print(list( x.structured_data for x in  execution.result))
-
-        return WorkerResult(request_id="", status="ok", data={})
+        return WorkerResult(request_id="", status="ok", data=list( x.structured_data for x in  execution.result))
     
     elif command == "create_index":
         ctx = create_new_ctx(app)
@@ -108,8 +106,11 @@ async def execute_command(app, command: str, payload: dict[str, Any]) -> WorkerR
 
         build_execution = BuildIndexState(table_access, payload["target_col"])
         build_execution.exec(ctx)
+        create_index(ctx.allocator, get_public_namespace(), **payload)
+
 
         command_callback(app)
+
 
         return WorkerResult(request_id="", status="ok", data={})
 

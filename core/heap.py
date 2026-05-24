@@ -251,6 +251,7 @@ class heap_page(page):
     
     @classmethod
     def is_visible(cls, ctx, tuple_buffer):
+        return True
         xmin, xmax = HeapTuple.get_minmax_from_buffer(tuple_buffer)
         if xmax == 0:
             return xmin <= ctx.xid
