@@ -31,9 +31,20 @@ def create_request__query_scan_index(entry_pg_id):
     request_id = str(uuid.uuid4())
     return {"request_id": request_id, "command": "scan_index", "payload": { "entry_pg_id": entry_pg_id } }
 
+def create_request__query_i_select(entry_pg_id, table_oid):
+    request_id = str(uuid.uuid4())
+    return {"request_id": request_id, "command": "i_select", "payload": { "index_entry_pg_id": entry_pg_id, "table_oid": table_oid } }
+
 async def select():
     async with websockets.connect(SERVER_URI) as ws:
         request = create_request__query_select(4001)
+        res = await send_request(ws, request)
+        for i in res["data"]:
+            print(i)
+
+async def i_select(index_entry_pg_id, oid):
+    async with websockets.connect(SERVER_URI) as ws:
+        request = create_request__query_i_select(index_entry_pg_id, oid)
         res = await send_request(ws, request)
         for i in res["data"]:
             print(i)
@@ -83,4 +94,5 @@ if __name__ == "__main__":
     #asyncio.run(scenario_zero())
     #asyncio.run(select())
     #asyncio.run(create_index())
-    asyncio.run(scan_index(217))
+    #asyncio.run(scan_index(217))
+    asyncio.run(i_select(217, 4001))

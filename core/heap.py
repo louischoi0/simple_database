@@ -94,7 +94,7 @@ class StructuredTuple(HeapTuple):
         cursor.write_int64(xmax)
 
     @classmethod
-    def parse(self, buffer):
+    def parse(self, buffer, schema=None):
         t = StructuredTuple(buffer)
         cursor = buffer_cursor(buffer)
 
@@ -103,6 +103,9 @@ class StructuredTuple(HeapTuple):
         t.xmax = cursor.read_int64()
         t.reserved = cursor.read_int64()
         t.pk = cursor.read_int64()
+
+        if schema is not None:
+            t.struct(schema)
 
         return t
     
@@ -207,7 +210,7 @@ class heap_page(page):
             buffer = cursor.read(size)
             item = f(buffer)
 
-            if raw_filter_func(item):
+            if raw_filter_func is None or raw_filter_func(item):
                 res.append(item)
 
         return res

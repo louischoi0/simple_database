@@ -58,7 +58,7 @@ async def execute_command(app, command: str, payload: dict[str, Any]) -> WorkerR
 
         execution = init_insert(get_public_namespace(), payload["table_oid"], payload["data"])
         execution.exec(ctx)
-        execution.on_finisehd()
+        execution.on_finished()
 
         command_callback(app)
         return WorkerResult(request_id="", status="ok", data={})
@@ -69,7 +69,7 @@ async def execute_command(app, command: str, payload: dict[str, Any]) -> WorkerR
         table_access = init_table_access(get_public_namespace(), payload["table_oid"], lockmode=2)
         execution = BtreePageExpandState(table_access, table_access.desc_pg_id, payload["new_min_key"])
         execution.exec(ctx)
-        execution.on_finisehd()
+        execution.on_finished()
 
         command_callback(app)
         return WorkerResult(request_id="", status="ok", data={})
@@ -81,7 +81,7 @@ async def execute_command(app, command: str, payload: dict[str, Any]) -> WorkerR
         execution = BtreePageScanState(table_access)
 
         execution.exec(ctx)
-        execution.on_finisehd()
+        execution.on_finished()
 
         data = list( x.struct(table_access.schema) for x in  execution.result )
         return WorkerResult(request_id="", status="ok", data=data)
@@ -96,13 +96,18 @@ async def execute_command(app, command: str, payload: dict[str, Any]) -> WorkerR
 
         execution = BtreeIndexPageScanState(table_access, index_entry_pg_id=217, predicate=Equal(IndexValueCol, 4))
         execution.exec(ctx)
+        execution.on_finished()
+
+        print(list( x.structured_data for x in  execution.result))
+
+        return WorkerResult(request_id="", status="ok", data={})
     
     elif command == "create_index":
         ctx = create_new_ctx(app)
         table_access = init_table_access(get_public_namespace(), payload["table_oid"], lockmode=2)
 
         build_execution = BuildIndexState(table_access, payload["target_col"])
-        build_execution.execute(ctx)
+        build_execution.exec(ctx)
 
         command_callback(app)
 
@@ -115,7 +120,7 @@ async def execute_command(app, command: str, payload: dict[str, Any]) -> WorkerR
         execution = BtreePageScanState(table_access)
 
         execution.exec(ctx)
-        execution.on_finisehd()
+        execution.on_finished()
 
         data = list( x.struct(table_access.schema) for x in  execution.result )
         return WorkerResult(request_id="", status="ok", data=data)

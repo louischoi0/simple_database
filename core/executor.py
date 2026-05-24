@@ -28,12 +28,12 @@ class Equal(QueryOperator):
         self.lhs = lhs 
         self.rhs = rhs
 
-    def __call__(self):
-        return unwrap(self.lhs) == unwrap(self.rhs)
+    def __call__(self, heap_tuple):
+        return unwrap(heap_tuple, self.lhs) == unwrap(heap_tuple, self.rhs)
 
 class Range(QueryOperator):
     def __init__(self, start, end, value):
-        super(Equal, self).__init__("range", start, end, value)
+        super(Range, self).__init__("range", start, end, value)
         self.start = start
         self.end = end
         self.value = value
@@ -41,11 +41,11 @@ class Range(QueryOperator):
     def __call__(self):
         return unwrap(self.start) <= unwrap(self.value) and unwrap(self.value) < unwrap(self.end)
 
-def unwrap(tuple, value):
+def unwrap(heap_tuple, value):
     if isinstance(value, Column):
-        return tuple.data[value.pos]
+        return heap_tuple.data[value.pos]
     elif isinstance(value, QueryOperator):
-        return value()
+        return value(heap_tuple)
     return value
 
 class QueryExecState:
@@ -53,7 +53,7 @@ class QueryExecState:
         self.table_access = table_access
         self.result = None
     
-    def on_finisehd(self):
+    def on_finished(self):
         if self.table_access.obj_lock is not None:
             self.table_access.obj_lock.release()
         
@@ -154,8 +154,11 @@ class BtreePageGetTupleState(QueryExecState):
     def exec(self, ctx: QueryExecutionCtx):
         assert is_table_clustered_btree(self.table_access)
 
+        print("btree page get tuple: ", self.table_access.desc_pg_id)
+
         btree_root_page: bt_node = ref_btree_page(self.table_access.desc_pg_id)
         self.result = btree_root_page.search(self.pk)
+
         return NO_ERR
 
 class BuildIndexState(QueryExecState):
@@ -163,7 +166,7 @@ class BuildIndexState(QueryExecState):
         super(BuildIndexState, self).__init__(table_access)
         self.target_col = target_col
     
-    def execute(self, ctx: QueryExecutionCtx=None):
+    def exec(self, ctx: QueryExecutionCtx=None):
         mem_sorted_set = {}
         index_tuple_id = 0
 
@@ -218,25 +221,28 @@ class BuildIndexState(QueryExecState):
 
 # Equal(IndexValueCol, 6)
         
-class BtreeIndexPageScanState(QueryExecutionCtx):
+class BtreeIndexPageScanState(QueryExecState):
     def __init__(self, table_access, index_entry_pg_id, predicate):
         super(BtreeIndexPageScanState, self).__init__(table_access)
         self.predicate = predicate
         self.index_entry_pg_id = index_entry_pg_id
 
     def exec(self, ctx: QueryExecutionCtx):
-        access = TableAccess(None, None, None, self.index_entry_pg_id, "btree", 1)
-        index_scan_execution = BtreePageScanState(table_access=access, func=lambda tuple: StructuredTuple.struct(IndexValueCol), predicate=self.predicate)
+        access = TableAccess(None, None, sys_int64_index_schema, self.index_entry_pg_id, "btree", 1)
+        index_scan_execution = BtreePageScanState(table_access=access, predicate=self.predicate)
         index_scan_execution.exec(ctx)
         res = []
 
         for t in index_scan_execution.result:
-            _res = BtreePageGetTupleState(self.table_access, t.key)
-            if _res is not None:
-                res.append(_res)
+            _exec = BtreePageGetTupleState(self.table_access, t.pk)
+            _exec.exec(ctx)
+
+            if _exec.result is not None:
+                res.append(_exec.result)
             print(t)
         
-        self.result = res
+        print("here: ", res)
+        self.set_result(res)
         return NO_ERR
 
 class BtreePageScanState(QueryExecState):
@@ -254,7 +260,7 @@ class BtreePageScanState(QueryExecState):
             return True
         
         def scan_heap_page(heap_page):
-            data = heap_page.raw_map(lambda buffer: StructuredTuple.parse(buffer), ctx)
+            data = heap_page.raw_map(lambda buffer: StructuredTuple.parse(buffer, schema=self.table_access.schema), ctx)
 
             if self.predicate is not None:
                 data = filter(self.predicate, data)
@@ -291,30 +297,14 @@ class BtreePageScanState(QueryExecState):
         return 0
 
 class HeapPageScanState(QueryExecState):
-    def __init__(self, table_access, targets=None, conditions=None):
+    def __init__(self, table_access, predicate=None):
         super(HeapPageScanState, self).__init__(table_access)
         self.current_ref_page = None
         self.current_slot_index = 0
         self.ref_pages = []
         self.results = []
 
-        if conditions is None:
-            self.conditions = []
-        else:
-            self.conditions = conditions
-        
-        if targets is None:
-            self.targets = []
-        else:
-            self.targets = targets
-        
-    def eval_conditions(self, tuple):
-        res = True
-        
-        for c in self.conditions:
-            res = res and unwrap(tuple, c)
-
-        return res 
+        self.predicate = predicate
 
     def exec(self):
         heap_page = ref_heap_page(self.table_access.desc_pg_id)
@@ -323,7 +313,7 @@ class HeapPageScanState(QueryExecState):
         while True:
             _res = heap_page.raw_filter(
                 f=lambda buffer: StructuredTuple.parse(buffer).struct(self.table_access.schema),
-                raw_filter_func=lambda tuple: self.eval_conditions(tuple)
+                raw_filter_func=self.predicate
             )
 
             res.extend(_res)
@@ -370,4 +360,4 @@ def init_select(namespace, table_oid):
     if table_access.clustered_type == "heap":
         return HeapPageScanState(table_access=table_access)
     elif table_access.clustered_type == "btree":
-        return BtreePageScanState
+        return BtreePageScanState(table_access=table_access)
