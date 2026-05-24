@@ -344,7 +344,13 @@ class bt_node:
         return index
     
     def get_internal_node_idx_to_go_down(self, tuple_key):
+        print(self.slots)
+        print(self.keys)
+        print(tuple_key)
+        print(self.key_count)
+
         for i, k in enumerate(self.keys):
+            print("i: ", i)
             if tuple_key < k:
                 return i
         return len(self.slots) - 1
@@ -463,7 +469,9 @@ class bt_node:
         self.slots = slots
         self.next_page_id = next_page_id
     
-    def search(self, key) -> bytearray| None:
+    def search(self, key, ctx=None) -> bytearray| None:
+        from core.heap import heap_page as HeapPage
+
         target = self
         
         while not is_btree_data_page(target):
@@ -473,10 +481,14 @@ class bt_node:
             vnode = bt_node.as_btnode(vnode)
             target = vnode
 
-        found_heap_page = None 
         heap_page = target.get_internal_node_to_go_down(key)
 
         assert _ptype(target) == PAGE_TYPE_DATA
         assert _ptype(heap_page) == PAGE_TYPE_HEAP
 
-        return heap_page.raw_get(key)
+        buffer = heap_page.raw_get(key)
+
+        if ctx is not None and not HeapPage.is_visible(ctx, buffer):
+            return None
+
+        return buffer

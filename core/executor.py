@@ -2,7 +2,7 @@ from core.catalog import Column, get_type, init_table_access
 from core.heap import StructuredTuple
 from core.page_mgr import ref_heap_page, ref_btree_page, global_hpalloc, page_allocator, ref_page
 from core.catalog import get_table_schema_from_cache, is_table_clustered_heap, is_table_clustered_btree, raw_build_schema_from_sys_columns
-from core.catalog import raw_update_sys_tables_table_desc
+from core.catalog import raw_update_sys_tables_table_desc, sys_int64_index_schema, TableAccess
 from core.wal import XLogWriter
 from core.heap import insert_with_grow
 from core.helper import _ptype, _id
@@ -13,6 +13,9 @@ from dataclasses import dataclass
 from utils.logging import info
 
 _info = lambda x: info("executor", x)
+IndexValueCol = sys_int64_index_schema.col_map["value"]
+
+NO_ERR = 0
 
 class QueryOperator:
     def __init__(self, name, *args):
@@ -25,19 +28,25 @@ class Equal(QueryOperator):
         self.lhs = lhs 
         self.rhs = rhs
 
-def unwrap(tuple, value):
-    match value:
-        case get_type("column"):
-            return tuple.data[value.pos]
-        case get_type("operator"):
-            return execute_operator_on_tuple(tuple, value)
-        case _ :
-            return value
+    def __call__(self):
+        return unwrap(self.lhs) == unwrap(self.rhs)
 
-def execute_operator_on_tuple(tuple, operator):
-    match operator.name:
-        case "equal":
-            return unwrap(tuple, operator.lhs) == unwrap(tuple, operator.rhs)
+class Range(QueryOperator):
+    def __init__(self, start, end, value):
+        super(Equal, self).__init__("range", start, end, value)
+        self.start = start
+        self.end = end
+        self.value = value
+
+    def __call__(self):
+        return unwrap(self.start) <= unwrap(self.value) and unwrap(self.value) < unwrap(self.end)
+
+def unwrap(tuple, value):
+    if isinstance(value, Column):
+        return tuple.data[value.pos]
+    elif isinstance(value, QueryOperator):
+        return value()
+    return value
 
 class QueryExecState:
     def __init__(self, table_access, *args, **kwargs):
@@ -135,31 +144,106 @@ class BtreePageInsertTupleState(QueryExecState):
             _info(f"insert tuple #{self.tuple.pk} to exisiting heap page #{heap_page.id}")
             insert_with_grow(global_hpalloc, heap_page, self.tuple)
 
-        return 1
+        return NO_ERR
     
 class BtreePageGetTupleState(QueryExecState):
-    def __init__(self, table_access, pk, targets=None, conditions=None):
+    def __init__(self, table_access, pk):
         super(BtreePageGetTupleState, self).__init__(table_access)
+        self.pk = pk
+    
+    def exec(self, ctx: QueryExecutionCtx):
+        assert is_table_clustered_btree(self.table_access)
 
-        if conditions is None:
-            self.conditions = []
-        else:
-            self.conditions = conditions
-        
-        if targets is None:
-            self.targets = []
-        else:
-            self.targets = targets
+        btree_root_page: bt_node = ref_btree_page(self.table_access.desc_pg_id)
+        self.result = btree_root_page.search(self.pk)
+        return NO_ERR
 
-class CreateIndexState(QueryExecState):
+class BuildIndexState(QueryExecState):
     def __init__(self, table_access, target_col):
-        super(CreateIndexState, self).__init__(table_access)
+        super(BuildIndexState, self).__init__(table_access)
         self.target_col = target_col
     
+    def execute(self, ctx: QueryExecutionCtx=None):
+        mem_sorted_set = {}
+        index_tuple_id = 0
+
+        def get_index_column_value(heap_tuple):
+            return heap_tuple.get(self.target_col)
+
+        def build_func(heap_tuple: StructuredTuple):
+            nonlocal index_tuple_id
+
+            heap_tuple.struct(self.table_access.schema)
+            value = get_index_column_value(heap_tuple)
+            index_tuple_id += 1
+
+            index_tuple = StructuredTuple.load(sys_int64_index_schema, { "id": index_tuple_id, "value": value, "key": heap_tuple.pk })
+
+            if value not in mem_sorted_set:
+                mem_sorted_set[value] = [ index_tuple ]
+            else:
+                mem_sorted_set[value].append(index_tuple)
+
+        scan_execution = BtreePageScanState(self.table_access, func=build_func)
+        scan_execution.exec(ctx)
+        heap_pages = []
+
+        for value_key in mem_sorted_set:
+            heap = ctx.allocator.hpalloc()
+            heap_pages.append(heap)
+            heap.mark_min_key(value_key)
+
+            for t in mem_sorted_set[value_key]:
+                insert_with_grow(ctx.allocator, heap, t, ctx)
+
+        btree_root = bt_node.new_root_page(ctx.allocator)
+        first_heap_page = heap_pages[0]
+
+        new_data_page = ctx.allocator.palloc()
+        new_data_page.type = PAGE_TYPE_DATA
+        new_data_page.min_key = first_heap_page.min_key
+
+        btn = bt_node(PAGE_TYPE_DATA, 0, new_data_page)
+        btn.slots = [ _id(first_heap_page) ]
+        btn.keys = []
+        btn.update_header_buffer()
+
+        btree_root.slots = [ _id(btn) ]
+        btree_root.keys = []
+        btree_root.key_count = 0
+        btree_root.min_key = first_heap_page.min_key
+
+        for idx, heap_page in enumerate(heap_pages[1:]):
+            btree_root = btree_root.insert(heap_page)
+
+# Equal(IndexValueCol, 6)
+        
+class BtreeIndexPageScanState(QueryExecutionCtx):
+    def __init__(self, table_access, index_entry_pg_id, predicate):
+        super(BtreeIndexPageScanState, self).__init__(table_access)
+        self.predicate = predicate
+        self.index_entry_pg_id = index_entry_pg_id
+
+    def exec(self, ctx: QueryExecutionCtx):
+        access = TableAccess(None, None, None, self.index_entry_pg_id, "btree", 1)
+        index_scan_execution = BtreePageScanState(table_access=access, func=lambda tuple: StructuredTuple.struct(IndexValueCol), predicate=self.predicate)
+        index_scan_execution.exec(ctx)
+        res = []
+
+        for t in index_scan_execution.result:
+            _res = BtreePageGetTupleState(self.table_access, t.key)
+            if _res is not None:
+                res.append(_res)
+            print(t)
+        
+        self.result = res
+        return NO_ERR
 
 class BtreePageScanState(QueryExecState):
-    def __init__(self, table_access):
+    def __init__(self, table_access, func=None, predicate=None):
         super(BtreePageScanState, self).__init__(table_access)
+        self.func = func
+        self.predicate = predicate
     
     def exec(self, ctx: QueryExecutionCtx):
         root_page = ref_btree_page(self.table_access.desc_pg_id)
@@ -171,6 +255,13 @@ class BtreePageScanState(QueryExecState):
         
         def scan_heap_page(heap_page):
             data = heap_page.raw_map(lambda buffer: StructuredTuple.parse(buffer), ctx)
+
+            if self.predicate is not None:
+                data = filter(self.predicate, data)
+
+            if self.func is not None:
+                data = map(self.func, data)
+
             _info(f"collected data from heap page: {data}")
             return data
 
@@ -184,6 +275,7 @@ class BtreePageScanState(QueryExecState):
                 node = node.as_heap()
                 node.activate()
                 _info(f"collect heap page: {_id(node)}")
+
                 return res.extend( scan_heap_page(node) )
 
             node = bt_node.as_btnode(node)
@@ -201,10 +293,8 @@ class BtreePageScanState(QueryExecState):
 class HeapPageScanState(QueryExecState):
     def __init__(self, table_access, targets=None, conditions=None):
         super(HeapPageScanState, self).__init__(table_access)
-
         self.current_ref_page = None
         self.current_slot_index = 0
-
         self.ref_pages = []
         self.results = []
 
@@ -249,6 +339,15 @@ class HeapPageScanState(QueryExecState):
         self.conditions.append(condition)
         return self
 
+def init_execute_ddl(namespace, table_oid):
+    table_access = init_table_access(namespace, table_oid, lockmode=2)
+    schema = get_table_schema_from_cache(table_oid)
+
+    if schema is None:
+        schema = raw_build_schema_from_sys_columns(table_oid)
+    
+    return table_access
+
 def init_insert(namespace, table_oid, raw_data):
     table_access = init_table_access(namespace, table_oid, lockmode=2)
     schema = get_table_schema_from_cache(table_oid)
@@ -266,7 +365,6 @@ def init_insert(namespace, table_oid, raw_data):
 
 def init_select(namespace, table_oid):
     table_access = init_table_access(namespace, table_oid, lockmode=1)
-
     #todo match scanstate type acording to table clustered type
 
     if table_access.clustered_type == "heap":

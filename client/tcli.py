@@ -11,6 +11,10 @@ async def send_request(ws, request) -> dict:
     raw = await ws.recv()
     return json.loads(raw)
 
+def create_request__query_create_index(table_oid):
+    request_id = str(uuid.uuid4())
+    return {"request_id": request_id, "command": "create_index", "payload": { "table_oid": table_oid, "target_col": "grade" } }
+
 def create_request__query_select(table_oid):
     request_id = str(uuid.uuid4())
     return {"request_id": request_id, "command": "select", "payload": { "table_oid": table_oid } }
@@ -21,11 +25,29 @@ def create_request__bt_new_heap_page(table_oid, new_min_key):
 
 def create_request__bt_insert_tuple(table_oid, min_key):
     request_id = str(uuid.uuid4())
-    return {"request_id": request_id, "command": "bt_tuple_insert", "payload": { "table_oid": table_oid,  "data": { "student_id": min_key, "name": "louis", "grade": 3 }} }
+    return {"request_id": request_id, "command": "bt_tuple_insert", "payload": { "table_oid": table_oid,  "data": { "student_id": min_key, "name": "louis", "grade": min_key % 10 }} }
+
+def create_request__query_scan_index(entry_pg_id):
+    request_id = str(uuid.uuid4())
+    return {"request_id": request_id, "command": "scan_index", "payload": { "entry_pg_id": entry_pg_id } }
 
 async def select():
     async with websockets.connect(SERVER_URI) as ws:
         request = create_request__query_select(4001)
+        res = await send_request(ws, request)
+        for i in res["data"]:
+            print(i)
+
+async def scan_index(entry_pg_id):
+    async with websockets.connect(SERVER_URI) as ws:
+        request = create_request__query_scan_index(entry_pg_id)
+        res = await send_request(ws, request)
+        for i in res["data"]:
+            print(i)
+
+async def create_index():
+    async with websockets.connect(SERVER_URI) as ws:
+        request = create_request__query_create_index(4001)
         res = await send_request(ws, request)
         for i in res["data"]:
             print(i)
@@ -44,7 +66,7 @@ async def scenario_zero():
         print(res)
         """
 
-        for i in range(21, 50):
+        for i in range(1, 70):
             request = create_request__bt_insert_tuple(4001, i)
             res = await send_request(ws, request)
             print(res)
@@ -59,4 +81,6 @@ async def main():
 if __name__ == "__main__":
     #asyncio.run(insert_tp())
     #asyncio.run(scenario_zero())
-    asyncio.run(select())
+    #asyncio.run(select())
+    #asyncio.run(create_index())
+    asyncio.run(scan_index(217))

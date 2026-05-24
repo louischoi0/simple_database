@@ -379,6 +379,12 @@ sys_types_schema = Schema([
     Column(generate_sys_col_oid(), get_sys_object_id("types"), 3, "len", get_type_val("int"), notnull=True, defval=None),
 ])
 
+sys_int64_index_schema = Schema([
+    Column(generate_sys_col_oid(), 0, 0, "id", get_type_val("int"), notnull=True, defval=None),
+    Column(generate_sys_col_oid(), 0, 1, "value", get_type_val("int"), notnull=True, defval=None),
+    Column(generate_sys_col_oid(), 0, 2, "key", get_type_val("int"), notnull=True, defval=None),
+])
+
 cache_table_schema(get_sys_object_id("types"), sys_types_schema)
 
 sys_objects_schema = Schema([
@@ -671,6 +677,11 @@ def raw_build_schema_from_sys_columns(oid):
     schema = Schema([ Column(**x) for x in columns ])
     cache_table_schema(oid, schema)
     return schema
+
+def init_scan_index(namespace, entry_pg_id, lockmode=None):
+    clustered_type = "btree"
+    # todo register oid to each index
+    return TableAccess(namespace, 0, sys_int64_index_schema, desc_pg_id=entry_pg_id, clustered_type=clustered_type, obj_lock=None)
 
 def init_table_access(namespace, oid, lockmode=None):
     if lockmode is not None:

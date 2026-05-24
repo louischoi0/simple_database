@@ -226,8 +226,6 @@ class heap_page(page):
     def _raw_map(self, f, ctx=None):
         cursor = self.cursor
         res = []
-
-        print(self.id, len(self.slots))
         
         for index, tuple_pos in enumerate(self.slots):
             if index in self.deleted:

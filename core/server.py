@@ -8,9 +8,10 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from core.executor import QueryExecutionCtx, BtreePageExpandState, init_insert, BtreePageScanState
+from core.executor import QueryExecutionCtx, BtreePageExpandState, init_insert, BtreePageScanState, BuildIndexState
+from core.executor import BtreeIndexPageScanState
 from core.tx import generate_xid
-from core.catalog import get_public_namespace
+from core.catalog import get_public_namespace, init_scan_index
 from utils.logging import info
 from core.catalog import init_table_access
 import traceback
@@ -85,13 +86,40 @@ async def execute_command(app, command: str, payload: dict[str, Any]) -> WorkerR
         data = list( x.struct(table_access.schema) for x in  execution.result )
         return WorkerResult(request_id="", status="ok", data=data)
     
+    elif command == "i_select":
+        ctx = create_new_ctx(app)
+
+        table_access = init_table_access(get_public_namespace(), payload["table_oid"], lockmode=1)
+        table_access.index_entry_pg_id = payload["index_entry_pg_id"]
+
+        from core.executor import Equal, IndexValueCol
+
+        execution = BtreeIndexPageScanState(table_access, index_entry_pg_id=217, predicate=Equal(IndexValueCol, 4))
+        execution.exec(ctx)
+    
     elif command == "create_index":
         ctx = create_new_ctx(app)
         table_access = init_table_access(get_public_namespace(), payload["table_oid"], lockmode=2)
 
+        build_execution = BuildIndexState(table_access, payload["target_col"])
+        build_execution.execute(ctx)
+
         command_callback(app)
+
         return WorkerResult(request_id="", status="ok", data={})
 
+    elif command == "scan_index":
+        ctx = create_new_ctx(app)
+
+        table_access = init_scan_index(get_public_namespace(), payload["entry_pg_id"], lockmode=1)
+        execution = BtreePageScanState(table_access)
+
+        execution.exec(ctx)
+        execution.on_finisehd()
+
+        data = list( x.struct(table_access.schema) for x in  execution.result )
+        return WorkerResult(request_id="", status="ok", data=data)
+    
     return WorkerResult(
         request_id="",
         status="error",

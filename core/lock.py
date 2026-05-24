@@ -54,16 +54,19 @@ class ObjectLock:
                 assert self.oid not in LOCK_HELD or LOCK_HELD[self.oid] is None
                 LOCK_HELD[self.oid] = self
 
+                _info(f"acquire lock oid={self.oid}")
                 return res
             else:
                 from time import sleep
                 sleep(0.01)
+
 
     def release(self):
         with MEM_POOL_LOCK:    
             assert self.held
             set_lock_value(self.oid, 0)
             LOCK_HELD[self.oid] = None
+        _info(f"release lock oid={self.oid}")
 
 def monitor_lock_state():
     for i in range(int(MEM_POOL_SIZE / 8)):
