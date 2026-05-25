@@ -1,6 +1,6 @@
 from core.const import *
 from core.page import is_btree_page, page, is_heap_page, is_btree_data_page
-from core.page_mgr import ref_page, ref_minkey
+from core.page_mgr import ref_page, ref_minkey, ref_btree_page
 from core.helper import _buffer, _ptype, _minkey, _id
 from core.page_mgr import global_palloc, ref_heap_page
 from core.blk import get_blk_diver
@@ -56,6 +56,21 @@ class bt_node:
     def is_underflow(self):
         assert len(self.keys) <= MAX_KEY_COUNT
         return len(self.keys) < MAX_KEY_COUNT / 2
+    
+    def get_height(self):
+        #todo cache height value in meta page
+        assert _ptype(self) == PAGE_TYPE_ROOT
+        vnode = self
+        height = 1
+
+        if self.empty():
+            return height
+
+        while _ptype(vnode) != PAGE_TYPE_DATA:
+            vnode = ref_btree_page(vnode.slots[0])
+            height +=1
+        
+        return height
     
     def insert_phase_one(self, inode):
         split_node = None
@@ -312,6 +327,7 @@ class bt_node:
             xlog = bt_node.create_xlog_btree_slot_insert(ctx.xid, _id(self), _id(inode), index)
             ctx.wal_writer.write_xlog(xlog)
 
+        _info(f"direct insert #{_id(inode)} to #{_id(self)} before: slots={self.slots}, min_key={_minkey(self)}, {_minkey(inode)}")
         if index > 0:
             self.slots.insert(index, _id(inode))
             self.keys.insert(index-1, _minkey(inode))
@@ -319,9 +335,10 @@ class bt_node:
             first_slot = self.slots[0]
             self.keys.insert(0, ref_minkey(first_slot))
             self.slots.insert(0, _id(inode))
-            self.set_min_key(_minkey(inode))
 
-        _info(f"direct insert: kindex={index}, keys={self.keys}, slots={self.slots}")
+        self.set_min_key(ref_minkey(self.slots[0]))
+
+        _info(f"direct insert #{_id(inode)} to #{_id(self)} after: kindex={index}, keys={self.keys}, slots={self.slots}, min_key={_minkey(self)}, {_minkey(inode)}")
 
         self.key_count += 1
         assert len(self.keys) == self.key_count
@@ -350,7 +367,10 @@ class bt_node:
         return len(self.slots) - 1
 
     def get_internal_node_to_go_down(self, tuple_key):
-        return self.slots[self.get_internal_node_idx_to_go_down(tuple_key)]
+        try:
+            return self.slots[self.get_internal_node_idx_to_go_down(tuple_key)]
+        except IndexError:
+            return 0
 
     def find_leaf_index_to_insert_page(self, tuple_key):
         idx = 0
@@ -470,12 +490,19 @@ class bt_node:
         
         while not is_btree_data_page(target):
             vnode_id = target.get_internal_node_to_go_down(key)
+
+            if vnode_id == NULL_PAGE:
+                return None
+
             vnode = ref_page(vnode_id)
             
             vnode = bt_node.as_btnode(vnode)
             target = vnode
 
         heap_page_id = target.get_internal_node_to_go_down(key)
+        if heap_page_id == NULL_PAGE:
+            return None
+
         heap_page = ref_heap_page(heap_page_id)
 
         assert _ptype(target) == PAGE_TYPE_DATA

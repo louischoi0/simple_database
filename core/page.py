@@ -1,5 +1,5 @@
 from core.const import *  
-from core.helper import _ptype
+from core.helper import _ptype, _id
 from utils.buffer_cursor import buffer_cursor
 from threading import Lock
 
@@ -42,7 +42,7 @@ def cast_page(page):
     elif is_meta_page(page):
         return page
     else:
-        raise Exception(f"unknown page type: {_ptype(page)}")
+        raise Exception(f"unknown page #{_id(page)} type: {_ptype(page)}")
 
 def get_page_name(type):
     if type == PAGE_TYPE_DATA:

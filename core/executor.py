@@ -1,5 +1,5 @@
 from core.catalog import Column, get_type, init_table_access
-from core.heap import StructuredTuple
+from core.heap import StructuredTuple, heap_page as HeapPage
 from core.page_mgr import ref_heap_page, ref_btree_page, global_hpalloc, page_allocator, ref_page
 from core.catalog import get_table_schema_from_cache, is_table_clustered_heap, is_table_clustered_btree, raw_build_schema_from_sys_columns
 from core.catalog import raw_update_sys_tables_table_desc, sys_int64_index_schema, TableAccess
@@ -16,6 +16,7 @@ _info = lambda *x: info("executor", *x)
 IndexValueCol = sys_int64_index_schema.col_map["value"]
 
 NO_ERR = 0
+BTREE_ALLOC_HEAP_FACTOR = 0.05
 
 class QueryOperator:
     def __init__(self, name, *args):
@@ -59,6 +60,7 @@ class QueryExecState:
         
     def set_result(self, res):
         self.result = res
+        return NO_ERR
 
 @dataclass
 class QueryExecutionCtx:
@@ -110,8 +112,12 @@ class BtreePageInsertTupleState(QueryExecState):
         btree_root_page = ref_btree_page(self.table_access.desc_pg_id)
         _info(f"execute page insert tuple on page {_id(btree_root_page)}")
 
+        if btree_root_page.search(self.tuple.pk) is not None:
+            raise Exception(f"duplicated key error: {self.tuple.pk}")
+
         if btree_root_page.empty():
-            return btree_root_page.insert_tuple_with_init(ctx.allocator, self.tuple, ctx=ctx)
+            btree_root_page.insert_tuple_with_init(ctx.allocator, self.tuple, ctx=ctx)
+            return self.set_result(self.tuple.pk)
 
         target_page = btree_root_page
         cursor.visit(target_page)
@@ -120,18 +126,27 @@ class BtreePageInsertTupleState(QueryExecState):
             target_page_index = target_page.get_internal_node_idx_to_go_down(self.tuple.pk)
             target_page = ref_btree_page(target_page.slots[target_page_index])
 
-        _info(f"tuple_id={self.tuple.pk}, target_page_id={_id(target_page)}, target_page_index={target_page_index}")
+        _info(f"tuple_id={self.tuple.pk}, target_page_id={_id(target_page)}, target_page_index={target_page_index}, key_count={target_page.key_count}")
 
-        if target_page_index == target_page.key_count + 1 or target_page_index == 0:
-            new_heap_page = global_hpalloc()
-            new_heap_page.insert(self.tuple, ctx=ctx)
-            new_heap_page.mark_min_key(self.tuple.pk)
+        heap_page_index = target_page.find_leaf_index_to_insert_page(self.tuple.pk)
+        heap_page: HeapPage = ref_heap_page(target_page.slots[heap_page_index-1])
+
+        if (heap_page_index == target_page.key_count + 1 and (heap_page.usage_pct() > BTREE_ALLOC_HEAP_FACTOR or not heap_page.possible(self.tuple.size))) or heap_page_index == 0:
+            _info(f"alloc new heap data page in {_id(target_page)}")
+
+            if heap_page_index == 0:
+                new_heap_page = global_hpalloc()
+                new_heap_page.insert(self.tuple, ctx=ctx)
+                new_heap_page.mark_min_key(self.tuple.pk)
+                assert c.size() == 1
+
+            else:
+                new_heap_page = heap_page.split_insert(self.tuple, ctx)
 
             split_node, c, _ = target_page.insert_phase_zero(new_heap_page, ctx=ctx)
-            assert c.size() == 1
 
             if split_node is None:
-                return target_page
+                return self.set_result(self.tuple.pk)
 
             new_root = bt_node.merge_split_node(self.tuple.pk, cursor, split_node, ctx=ctx)
 
@@ -139,12 +154,12 @@ class BtreePageInsertTupleState(QueryExecState):
                 raw_update_sys_tables_table_desc(self.table_access.oid, _id(new_root))
 
         else:
-            heap_page_index = target_page.find_leaf_index_to_insert_page(self.tuple.pk)
-            heap_page = ref_heap_page(target_page.slots[heap_page_index-1])
             _info(f"insert tuple #{self.tuple.pk} to exisiting heap page #{heap_page.id}")
-            insert_with_grow(global_hpalloc, heap_page, self.tuple)
+            #insert_with_grow(global_hpalloc, heap_page, self.tuple)
+            ret = heap_page.insert(self.tuple)
+            assert ret >= 0
 
-        return NO_ERR
+        return self.set_result(self.tuple.pk)
     
 class BtreePageGetTupleState(QueryExecState):
     def __init__(self, table_access, pk):

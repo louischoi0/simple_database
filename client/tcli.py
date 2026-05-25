@@ -25,7 +25,7 @@ def create_request__bt_new_heap_page(table_oid, new_min_key):
 
 def create_request__bt_insert_tuple(table_oid, min_key):
     request_id = str(uuid.uuid4())
-    return {"request_id": request_id, "command": "bt_tuple_insert", "payload": { "table_oid": table_oid,  "data": { "student_id": min_key, "name": "louis", "grade": min_key % 10 }} }
+    return {"request_id": request_id, "command": "bt_tuple_insert", "payload": { "table_oid": table_oid, "data": { "student_id": min_key, "name": "louis", "grade": min_key % 10 }} }
 
 def create_request__query_scan_index(entry_pg_id):
     request_id = str(uuid.uuid4())
@@ -35,64 +35,100 @@ def create_request__query_i_select(entry_pg_id, table_oid):
     request_id = str(uuid.uuid4())
     return {"request_id": request_id, "command": "i_select", "payload": { "index_entry_pg_id": entry_pg_id, "table_oid": table_oid } }
 
-async def select():
+def create_request__query_scan_heap(page_id, table_oid=4001):
+    request_id = str(uuid.uuid4())
+    return {"request_id": request_id, "command": "scan_heap", "payload": { "page_id": int(page_id), "table_oid": int(table_oid) } }
+
+# ── commands ──────────────────────────────────────────────────────────────────
+
+async def scan_heap(args):
+    async with websockets.connect(SERVER_URI) as ws:
+        request = create_request__query_scan_heap(*args)
+        res = await send_request(ws, request)
+        for i in res["data"]:
+            print(i)
+
+async def select(args):
     async with websockets.connect(SERVER_URI) as ws:
         request = create_request__query_select(4001)
         res = await send_request(ws, request)
         for i in res["data"]:
             print(i)
 
-async def i_select(index_entry_pg_id, oid):
+async def i_select(args):
+    index_entry_pg_id = int(args[0])
+    oid = int(args[1])
     async with websockets.connect(SERVER_URI) as ws:
         request = create_request__query_i_select(index_entry_pg_id, oid)
         res = await send_request(ws, request)
         for i in res["data"]:
             print(i)
 
-async def scan_index(entry_pg_id):
+async def scan_index(args):
+    entry_pg_id = int(args[0])
     async with websockets.connect(SERVER_URI) as ws:
         request = create_request__query_scan_index(entry_pg_id)
         res = await send_request(ws, request)
         for i in res["data"]:
             print(i)
 
-async def create_index():
+async def create_index(args):
     async with websockets.connect(SERVER_URI) as ws:
         request = create_request__query_create_index(4001)
         res = await send_request(ws, request)
         for i in res["data"]:
             print(i)
 
-async def insert_tp():
+async def insert_tp(args):
+    min_key = int(args[0])
     async with websockets.connect(SERVER_URI) as ws:
-        request = create_request__bt_insert_tuple(4001, int(sys.argv[1]))
-        res = await send_request(ws, request)
-        print(res["data"])
-
-async def scenario_zero():
-    async with websockets.connect(SERVER_URI) as ws:
-        """
-        request = create_request__bt_new_heap_page(4001, 27)
+        request = create_request__bt_insert_tuple(4001, min_key)
         res = await send_request(ws, request)
         print(res)
-        """
 
-        for i in range(20, 200):
-            request = create_request__bt_insert_tuple(4001, i)
+async def scenario_zero(args):
+    count = int(args[0])
+
+    async with websockets.connect(SERVER_URI) as ws:
+        from random import randint
+        for i in range(0, count):
+            k = randint(0, 20000)
+            print(k)
+            request = create_request__bt_insert_tuple(4001, k)
             res = await send_request(ws, request)
             print(res)
 
-async def main():
-    async with websockets.connect(SERVER_URI) as ws:
-        #request = create_request__bt_new_heap_page(4001, int(sys.argv[1]))
-        request = create_request__bt_insert_tuple(4001, int(sys.argv[1]))
-        res = await send_request(ws, request)
-        print(res["data"])
+# ── dispatch ──────────────────────────────────────────────────────────────────
+
+COMMANDS = {
+    "select":        (select,        ""),
+    "i_select":      (i_select,      "<entry_pg_id> <table_oid>"),
+    "scan_index":    (scan_index,    "<entry_pg_id>"),
+    "scan_heap":     (scan_heap, "<page_id>"),
+    "create_index":  (create_index,  ""),
+    "insert_tp":     (insert_tp,     "<min_key>"),
+    "zero": (scenario_zero, "<count>"),
+}
+
+def print_usage():
+    print("usage: client.py <command> [args...]")
+    print()
+    print("commands:")
+    for name, (_, usage) in COMMANDS.items():
+        print(f"  {name} {usage}")
 
 if __name__ == "__main__":
-    #asyncio.run(insert_tp())
-    asyncio.run(scenario_zero())
-    #asyncio.run(select())
-    #asyncio.run(create_index())
-    #asyncio.run(scan_index(223))
-    #asyncio.run(i_select(223, 4001))
+    if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
+        print_usage()
+        sys.exit(0)
+
+    cmd = sys.argv[1]
+    args = sys.argv[2:]
+
+    if cmd not in COMMANDS:
+        print(f"unknown command: {cmd}")
+        print_usage()
+        sys.exit(1)
+
+    func, _ = COMMANDS[cmd]
+    asyncio.run(func(args))

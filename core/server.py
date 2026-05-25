@@ -14,6 +14,8 @@ from core.tx import generate_xid
 from core.catalog import get_public_namespace, init_scan_index
 from utils.logging import info
 from core.catalog import init_table_access, create_index
+from core.page_mgr import ref_heap_page
+from core.heap import StructuredTuple
 import traceback
 
 import websockets
@@ -61,7 +63,7 @@ async def execute_command(app, command: str, payload: dict[str, Any]) -> WorkerR
         execution.on_finished()
 
         command_callback(app)
-        return WorkerResult(request_id="", status="ok", data={})
+        return WorkerResult(request_id="", status="ok", data=execution.result)
     
     elif command == "bt_new_heap_page":
         ctx = create_new_ctx(app) 
@@ -108,11 +110,18 @@ async def execute_command(app, command: str, payload: dict[str, Any]) -> WorkerR
         build_execution.exec(ctx)
         create_index(ctx.allocator, get_public_namespace(), **payload)
 
-
         command_callback(app)
 
-
         return WorkerResult(request_id="", status="ok", data={})
+    
+    elif command == "scan_heap":
+        ctx = create_new_ctx(app)
+        table_access = init_table_access(get_public_namespace(), payload["table_oid"], lockmode=None)
+
+        heap_page = ref_heap_page(payload["page_id"])
+        read_datas = heap_page.raw_map(lambda buffer: StructuredTuple.parse(buffer).struct(table_access.schema))
+
+        return WorkerResult(request_id="", status="ok", data=read_datas)
 
     elif command == "scan_index":
         ctx = create_new_ctx(app)

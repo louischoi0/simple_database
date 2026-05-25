@@ -71,6 +71,7 @@ class StructuredTuple(HeapTuple):
     def get_null_flag(self, colnum):
         value = self.get_null_flag_buffer()
         return bool(value & (1 << colnum))
+
     
     def set_null_flag(self, colnum, flag):
         cursor = buffer_cursor(self.buffer)
@@ -315,6 +316,9 @@ class heap_page(page):
     def capacity(self):
         return self.slot_cursor - (heap_page.SLOT_SEGMENT_OFFSET + (heap_page.SLOT_SIZE * (self.tuple_count + 1)))
     
+    def usage_pct(self):
+        return (PAGE_SIZE - self.capacity()) / PAGE_SIZE
+    
     def possible(self, size):
         return self.capacity() >= size
 
@@ -388,6 +392,13 @@ class heap_page(page):
         
         return -1
     
+    @classmethod
+    def read_tuple_buffer(cls, cursor, pos):
+        cursor.at(pos)
+        size = cursor.read_int64() 
+        cursor.at(pos)
+        return cursor.read(size)
+    
     def get_slot_index_by_pk(self, pk):
         cursor = buffer_cursor(_buffer(self))
 
@@ -395,11 +406,7 @@ class heap_page(page):
             if idx in self.deleted:
                 continue
 
-            cursor.at(pos)
-
-            size = cursor.read_int64() 
-            cursor.at(pos)
-            tuple_buffer = cursor.read(size)
+            tuple_buffer = heap_page.read_tuple_buffer(cursor, pos)
             _pk = HeapTuple.get_pk_from_buffer(tuple_buffer)
 
             if pk == _pk:
@@ -416,6 +423,77 @@ class heap_page(page):
         
     def empty(self):
         return self.tuple_count == 0
+
+    def split_insert(self, t, ctx):
+        self.lock.acquire()
+        assert self.tuple_count > 1
+        
+        new_heap_page  = ctx.allocator.hpalloc()
+        new_heap_page.lock.acquire()
+
+        temp_heap_page = ctx.allocator.hpalloc()
+        # TODO return temp heap page
+
+        tuples = []
+        cursor = buffer_cursor(self.buffer)
+
+        for pos in self.slots:
+            buffer = heap_page.read_tuple_buffer(cursor, pos)
+            tuples.append( ( StructuredTuple.get_pk_from_buffer(buffer), buffer) )
+        
+        tuples_sorted = sorted(tuples, key=lambda x: x[0])
+        mid_index = int(len(tuples_sorted) / 2)
+
+        grp0 = tuples_sorted[:mid_index]
+        grp0_min_key = grp0[0][0]
+
+        for idx, t0 in enumerate(grp0):
+            _, buffer = t0
+            size = len(buffer)
+
+            temp_heap_page.tuple_count = idx + 1
+            temp_heap_page.add_slot(size)
+            temp_heap_page.write_tuple_data(size, buffer) 
+
+        temp_heap_page.write_tuple_count()
+        temp_heap_page.mark_min_key(grp0_min_key)
+        temp_heap_page.update_header_buffer()
+
+        assert len(temp_heap_page.buffer) == PAGE_SIZE
+
+        self.buffer[:PAGE_SIZE] = temp_heap_page.buffer[:PAGE_SIZE]
+        self.mark_dirty_flag()
+
+        grp1 = tuples_sorted[mid_index:]
+        grp1_min_key = grp1[0][0]
+
+        for idx, t1 in enumerate(grp1):
+            _, buffer = t1
+            size = len(buffer)
+
+            new_heap_page.tuple_count = idx + 1
+            new_heap_page.add_slot(size)
+            new_heap_page.write_tuple_data(size, buffer) 
+
+        new_heap_page.write_tuple_count()
+        new_heap_page.mark_min_key(grp1_min_key)
+        new_heap_page.update_header_buffer()
+
+        target = None
+        if t.pk < grp1_min_key:
+            target = self
+        else:
+            target = new_heap_page
+
+        target.tuple_count += 1
+        target.add_slot(t.size)
+        target.write_tuple_data(t.size, t.buffer)
+        target.update_header_buffer()
+
+        self.lock.release()
+        new_heap_page.lock.release()
+
+        return new_heap_page
         
     def insert(self, t, ctx=None, locking=True):
         locking and self.lock.acquire()
