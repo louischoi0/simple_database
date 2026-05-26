@@ -1,9 +1,30 @@
-from app import new_root_page
+import asyncio
+import json
+import uuid
+import websockets
+import sys
 
-class btree_test:
-  def __init__(self, app):
-      self.app = app
+SERVER_URI = "ws://localhost:5678"
 
-  def btree_write_read(self):
+async def send_request(ws, request) -> dict:
+    await ws.send(json.dumps(request))
+    raw = await ws.recv()
+    return json.loads(raw)
 
+def create_request__bt_new_heap_page(table_oid, new_min_key):
+    request_id = str(uuid.uuid4())
+    return {"request_id": request_id, "command": "bt_new_heap_page", "payload": { "table_oid": table_oid, "new_min_key": new_min_key } }
 
+def create_request__bt_insert_tuple(table_oid, min_key):
+    request_id = str(uuid.uuid4())
+    return {"request_id": request_id, "command": "bt_tuple_insert", "payload": { "table_oid": table_oid,  "data": { "student_id": min_key, "name": "louis", "grade": 3 }} }
+
+async def main():
+    async with websockets.connect(SERVER_URI) as ws:
+        #request = create_request__bt_new_heap_page(4001, int(sys.argv[1]))
+        request = create_request__bt_insert_tuple(4001, int(sys.argv[1]))
+        res = await send_request(ws, request)
+        print(res)
+
+if __name__ == "__main__":
+    asyncio.run(main())

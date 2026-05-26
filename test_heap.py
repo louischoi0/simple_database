@@ -165,7 +165,6 @@ def test_structured_tuple(app):
             assert a.get(k) == b[k]
         
         read_tuple = StructuredTuple.load(test_table_schema, b)
-        #print(read_tuple.xmin)
         
     assert heap.tuple_count == len(datas) + len(heap.deleted)
     assert len(datas) == len(read_datas)
@@ -181,6 +180,11 @@ def test_structured_tuple(app):
         assert heap.search(i) == i
         assert read_heap_page.search(i) == i
 
+        buffer = heap.raw_get(i)
+        st = StructuredTuple.parse(buffer)
+        d = st.struct(test_table_schema)
+        print(d)
+
     assert read_heap_page.tuple_count == heap.tuple_count
     assert heap.checksum() == read_heap_page.checksum()
     print(heap.checksum())
@@ -190,11 +194,11 @@ if __name__ == '__main__':
     app.disable_background_proc()
     app.activate()
 
-    test_heap_page_rollback(app)
-    test_structed_tuple2()
+    #test_heap_page_rollback(app)
+    #test_structed_tuple2()
     test_structured_tuple(app)
-    test_heap_page_grow(app)
-    test_xmin_with_ctx(app)
+    #test_heap_page_grow(app)
+    #test_xmin_with_ctx(app)
 
     app.cache_pool.autocommit()
     app.meta.commit_metablock()

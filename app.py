@@ -1,5 +1,6 @@
 import sys
 import threading
+import os
 
 from core.blk import _init_blk_driver
 from core.page_mgr import page_allocator, _init_mgr_module, ref_heap_page
@@ -26,11 +27,6 @@ def get_test_keys():
 
     for k in keys:
         yield k
-
-def get_simple_key(simple_tuple):
-    cursor = buffer_cursor(simple_tuple.buffer)
-    cursor.advance(StructuredTuple.HEAP_TUPLE_HEADER_SIZE)
-    return cursor.read_int64()
 
 key_gen = get_test_keys()
 
@@ -145,6 +141,11 @@ def exec_command(cmd):
         app.cache_pool.autocommit()
         exit(0)
     
+    elif ctype == "start":
+        app = bootstrap_main(ENABLE_WAL_SYSTEM)
+        app.start_server()
+        exit(0)
+    
     elif ctype == "new_root":
         app = bootstrap_main(ENABLE_WAL_SYSTEM)
         
@@ -232,7 +233,7 @@ def exec_command(cmd):
         app = bootstrap_main(ENABLE_WAL_SYSTEM)
 
         from core.executor import init_insert, QueryExecutionCtx
-        d0 = { "student_id": new_key, "name": "louis", "grade": 3}
+        d0 = { "student_id": new_key, "name": "louis", "grade": 3 }
         ctx = QueryExecutionCtx(1, app.alloc, app.wal_writer)
         from core.catalog import get_sys_namespace
 
@@ -309,7 +310,6 @@ def exec_command(cmd):
     return app
 
 def bootstrap_main(background=True):
-    import os
     num = os.environ.get("DRIVE_NUM", 0)
     app = DBMaster(driver_num=int(num))
 
