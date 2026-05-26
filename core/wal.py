@@ -35,6 +35,18 @@ WAL_CHECKPOINTER_LOCK = threading.Lock()
 
 WAL_SEGMENT_HEADER_SIZE = 0
 
+global AUTO_COMMIT
+AUTO_COMMIT = False
+global AUTO_COMMIT_FUNC
+AUTO_COMMIT_FUNC = None
+
+def set_auto_commit(f, v):
+    global AUTO_COMMIT
+    global AUTO_COMMIT_FUNC
+
+    AUTO_COMMIT = v
+    AUTO_COMMIT_FUNC = f
+
 def get_next_wal_seg_file(filename):
     num = int(filename[6:]) + 1
     return "walseg" + num.zfill(8)
@@ -61,7 +73,7 @@ class XLogWriter:
         self.last_lsn = get_metablock().get_value("checkpointer_lsn_committed")
     
     def enqueue_xlog(self, xlog):
-        _info(f"enqueue xlog, cmd={xlog.cmd}; lsn={xlog.lsn}")
+        _info(f"enqueue xlog, cmd={xlog.cmd}; lsn={xlog.lsn} page_id={xlog.payload.page_id}")
         with self.queue_lock:
             self.queue.append(xlog)
     
@@ -191,6 +203,9 @@ class XLogCheckpointer:
                 print(xlog)
 
     def iter_xlog(self):
+        global AUTO_COMMIT
+        global AUTO_COMMIT_FUNC
+
         with WAL_SEGMENT_LOCK:
             with buffer_cursor.from_file(self.current_wal_seg_file, WAL_SEGMENT_SIZE) as cursor:
                 while True:
@@ -212,6 +227,11 @@ class XLogCheckpointer:
                     self.set_current_cursor_pos(cursor)
                     self.meta.set_last_committed_wal_seg_pos_with_commit(self.cursor_pos)
                     self.previous_lsn = xlog.lsn
+                    _info(f"finished xlog commit lsn={xlog.lsn} len={len(xlog_buffer)} cursor_pos={self.cursor_pos}")
+
+                    if AUTO_COMMIT:
+                        AUTO_COMMIT_FUNC()
+
 
     def set_current_cursor_pos(self, cursor):
         self.cursor_pos = cursor.c
@@ -221,11 +241,20 @@ class XLogCheckpointer:
         pg.clear_dirty_flag()
     
     def do_commit_xlog(self, xlog):
-        if xlog.cmd == "hinsertx":
-            from core.page_mgr import ref_heap_page
-            page = ref_heap_page(xlog.payload.page_id)
-            self.commit_page(page)
+        from core.page_mgr import ref_heap_page, ref_page
 
+        if xlog.cmd == "hinsertx":
+            page = ref_heap_page(xlog.payload.page_id)
+
+        elif xlog.cmd == "fullpgwr":
+            page = ref_page(xlog.payload.page_id)
+
+        elif xlog.cmd == "binserth":
+            page = ref_page(xlog.payload.page_id)
+        else:
+            raise Exception(f"unknown xlog command type: {xlog.cmd}")
+
+        self.commit_page(page)
         self.meta.set_end_lsn_with_commit(xlog.lsn)
         self.meta.set_commit_lsn_with_commit(xlog.lsn)
 
@@ -245,6 +274,7 @@ class XLog:
         self.prev_lsn = prev_lsn
         self.lsn = lsn
         self.payload = payload
+        self.page_id = None
 
     def __repr__(self):
         return f"xid={self.xid}; cmd={self.cmd}; lsn={self.lsn}; payload={self.payload}"
@@ -340,6 +370,8 @@ class XLogBtreeInsertSlotCMDPayload:
         self.target_page_id = target_page_id
         self.new_page_id = new_page_id
         self.slot_index = slot_index
+
+        self.page_id = target_page_id
     
     def __repr__(self):
         return f"( target_page_id={self.target_page_id}; new_page_id={self.new_page_id}; slot_index={self.slot_index}; )"

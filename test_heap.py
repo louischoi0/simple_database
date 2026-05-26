@@ -92,6 +92,40 @@ def test_xmin_with_ctx(app):
     for i in read_datas:
         assert i.xmin == TEST_TXID
 
+def test_split_insert(app):
+    datas = []
+    ctx = QueryExecutionCtx(72, app.alloc, app.wal_writer)
+
+    for i in range(10):
+        item = data_template.copy()
+        item["student_id"] = i
+        item["name"] += str(i)
+        item["grade"] = i % 4
+
+        item = StructuredTuple.load(test_table_schema, item)
+        item.struct(test_table_schema)
+
+        datas.append(item)
+
+    heap: HeapPage = app.alloc.hpalloc()
+
+    c = 0
+
+    for item in datas:
+        heap.insert(item)
+        c += 1
+
+    new_item = data_template.copy()
+    new_item["student_id"] = 10
+    new_item["name"] += str(i)
+    new_item["grade"] = i % 4
+
+    new_item = StructuredTuple.load(test_table_schema, new_item)
+    new_item.struct(test_table_schema)
+
+    new_heap = heap.split_insert(new_item, ctx)
+    print(f"new_heap: id={new_heap.id}, count={new_heap.tuple_count}")
+
 def test_heap_page_grow(app):
     datas = []
     ctx = QueryExecutionCtx(72, app.alloc, app.wal_writer)
@@ -196,9 +230,10 @@ if __name__ == '__main__':
 
     #test_heap_page_rollback(app)
     #test_structed_tuple2()
-    test_structured_tuple(app)
+    #test_structured_tuple(app)
     #test_heap_page_grow(app)
     #test_xmin_with_ctx(app)
+    test_split_insert(app)
 
     app.cache_pool.autocommit()
     app.meta.commit_metablock()

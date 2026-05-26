@@ -1,5 +1,5 @@
 from core.const import *  
-from core.helper import _ptype
+from core.helper import _ptype, _id
 from utils.buffer_cursor import buffer_cursor
 from threading import Lock
 
@@ -42,7 +42,7 @@ def cast_page(page):
     elif is_meta_page(page):
         return page
     else:
-        raise Exception(f"unknown page type: {_ptype(page)}")
+        raise Exception(f"unknown page #{_id(page)} type: {_ptype(page)}")
 
 def get_page_name(type):
     if type == PAGE_TYPE_DATA:
@@ -54,7 +54,7 @@ def get_page_name(type):
     elif type == PAGE_TYPE_HEAP:
         return "heap"
     else:
-        return "invalid page"
+        return "invalid page (corrupted)"
 
 class page:
     def __init__(self, page_id, type, min_key):
@@ -66,7 +66,7 @@ class page:
         self.dirty = False
 
         self.lock = Lock()
-        self.pin = 0
+        self.pin_count = 0
         PG_LIST.append(page_id)
 
     def checksum(self):
@@ -79,10 +79,11 @@ class page:
         return buffer_cursor(self.buffer)
     
     def pin(self):
-        self.pin += 1
+        self.pin_count += 1
     
     def unpin(self):
-        self.pin -= 1
+        assert self.pin_count > 0
+        self.pin_count -= 1
 
     def acquire_lock(self):
         self.lock.acquire()
@@ -124,7 +125,7 @@ class page:
         id, type, min_key = self.parse_header_buffer(self.buffer)
         self.id = id
         self.type = type
-        self.min_key
+        self.min_key = min_key
     
     def as_heap(self):
         assert self.type == PAGE_TYPE_HEAP

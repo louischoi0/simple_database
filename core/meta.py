@@ -138,13 +138,13 @@ class metablock:
             cursor.write_int64(pos)
             self.commit_metablock()
     
-    def set_oldest_xid_with_commit(self, pos):
+    def set_oldest_xid_with_commit(self, xid):
         with self.lock:
-            xid = self.oldest_xid
+            self.oldest_xid = xid
             offset = PAGE_HDR_SIZE + 72
             cursor = buffer_cursor(self.meta_page.buffer)
             cursor.at(offset)
-            cursor.write_int64(xid)
+            cursor.write_int64(self.oldest_xid)
             self.commit_metablock()
     
     def get_value(self, key):
@@ -194,17 +194,17 @@ class metablock:
         return self.next_page
 
     def commit_metablock(self):
-        _info(f"commit metablodk: {self}")
+        #_info(f"commit metablodk: {self}")
         self.blkdev.write_page(self.meta_page)
 
-def get_metablock():
+def get_metablock() -> metablock:
     return META
     
 def get_meta_attr(key):
     global META
     return getattr(META, key)
 
-def _init_meta_system(blkdev):
+def _init_meta_system(blkdev) -> metablock:
     global META
     META = metablock(blkdev)
     META.init()

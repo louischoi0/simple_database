@@ -71,6 +71,7 @@ class StructuredTuple(HeapTuple):
     def get_null_flag(self, colnum):
         value = self.get_null_flag_buffer()
         return bool(value & (1 << colnum))
+
     
     def set_null_flag(self, colnum, flag):
         cursor = buffer_cursor(self.buffer)
@@ -94,7 +95,7 @@ class StructuredTuple(HeapTuple):
         cursor.write_int64(xmax)
 
     @classmethod
-    def parse(self, buffer):
+    def parse(self, buffer, schema=None):
         t = StructuredTuple(buffer)
         cursor = buffer_cursor(buffer)
 
@@ -103,6 +104,9 @@ class StructuredTuple(HeapTuple):
         t.xmax = cursor.read_int64()
         t.reserved = cursor.read_int64()
         t.pk = cursor.read_int64()
+
+        if schema is not None:
+            t.struct(schema)
 
         return t
     
@@ -153,6 +157,18 @@ class heap_page(page):
         self.activated = False
         self.next_page_id = None
     
+    def clear(self):
+        with self.lock:
+            _page_id = self.id
+            self.buffer = bytearray(b'\x00' * int(PAGE_SIZE))
+
+            self.id = _page_id
+            self.tuple_count = 0
+            self.slots = []
+            self.deleted = []
+            self.type = PAGE_TYPE_HEAP
+
+            self.update_header_buffer()
     
     def read_next_page_pointer(self):
         self.cursor.at(heap_page.HEAP_NEXT_PAGE_POINTER_OFFSET)
@@ -169,8 +185,10 @@ class heap_page(page):
         return self.read_next_page_pointer() != 0
 
     def write_tuple_count(self):
+        self.pin()
         _info(f"write tuple_count to heap page:{self.id} count={self.tuple_count}")
         self.buffer[HDR_SIZE: HDR_SIZE+8] = serint64(self.tuple_count)
+        self.unpin()
 
     def add_slot(self, tuple_size):
         last = self.slot_cursor
@@ -207,14 +225,26 @@ class heap_page(page):
             buffer = cursor.read(size)
             item = f(buffer)
 
-            if raw_filter_func(item):
+            if raw_filter_func is None or raw_filter_func(item):
                 res.append(item)
 
         return res
     
     def raw_map(self, f, ctx=None):
+        res = self._raw_map(f, ctx)
+        ref_page = self
+        from core.page_mgr import ref_heap_page
+
+        while ref_page.has_next():
+            ref_page = ref_heap_page(ref_page.next_page_id)
+            res.extend(ref_page._raw_map(f, ctx))
+        
+        return list(x[1] for x in res)
+    
+    def _raw_map(self, f, ctx=None):
         cursor = self.cursor
         res = []
+        
         for index, tuple_pos in enumerate(self.slots):
             if index in self.deleted:
                 continue 
@@ -230,13 +260,16 @@ class heap_page(page):
             if ctx is not None and not heap_page.is_visible(ctx, buffer):
                 continue 
 
-            res.append(f(buffer))
+            res.append( ( HeapTuple.get_pk_from_buffer(buffer), f(buffer) ) )
 
-        return res
+        return sorted(res, key=lambda x: x[0])
     
     @classmethod
     def is_visible(cls, ctx, tuple_buffer):
+        return True
         xmin, xmax = HeapTuple.get_minmax_from_buffer(tuple_buffer)
+        if xmax == 0:
+            return xmin <= ctx.xid
         return xmin <= ctx.xid < xmax
 
     def load_slots_from_buffer(self):
@@ -257,6 +290,7 @@ class heap_page(page):
             if self.activated:
                 return
 
+            self.pin()
             self.apply_header_buffer()
             self.load_slots_from_buffer()
             self.deleted = []
@@ -269,8 +303,11 @@ class heap_page(page):
 
             self.activated = True        
             self.read_next_page_pointer()
+            self.unpin()
     
     def delete_tuple_by_index(self, index):
+        self.pin()
+
         pos = self.slots[index]
         self.cursor.at(pos)
 
@@ -279,13 +316,17 @@ class heap_page(page):
         self.cursor.write_int64(0)
         self.deleted.append(index)
     
+        self.unpin()
+
     def compact(self):
         # cleanup all deletions
         pass
     
     def write_tuple_data(self, size, data_buffer):
+        self.pin()
         # todo: write to wal segment for fist instead page buffer directly
         if size < HeapTuple.HEAP_TUPLE_HEADER_SIZE:
+            self.unpin()
             raise Exception(f"heap tuple size underflow: {size}")
 
         self.cursor.at(self.slot_cursor)
@@ -293,9 +334,13 @@ class heap_page(page):
         _info(f"write tuple data from={self.slot_cursor} to {self.slot_cursor+size}, size={size}")
         self.cursor.at(self.slot_cursor)
         self.cursor.write_raw(data_buffer)
+        self.unpin()
      
     def capacity(self):
         return self.slot_cursor - (heap_page.SLOT_SEGMENT_OFFSET + (heap_page.SLOT_SIZE * (self.tuple_count + 1)))
+    
+    def usage_pct(self):
+        return (PAGE_SIZE - self.capacity()) / PAGE_SIZE
     
     def possible(self, size):
         return self.capacity() >= size
@@ -303,6 +348,7 @@ class heap_page(page):
     def rollback_insert(self, slot_index):
 
         with self.lock:
+            self.pin()
             cursor = buffer_cursor(self.buffer)
             pos = self.slots[slot_index]
 
@@ -316,12 +362,11 @@ class heap_page(page):
 
             self.write_tuple_count()
             self.update_header_buffer()
+            self.unpin()
 
     def before_write_data(self, wal_writer, slot_index, tuple_data):
         from core.wal import create_xlog_heap_insert_cmd
         xlog = create_xlog_heap_insert_cmd(tuple_data.xmin, self.id, slot_index, tuple_data)
-
-
         wal_writer.write_xlog(xlog)
 
     def raw_get(self, pk):
@@ -330,7 +375,8 @@ class heap_page(page):
 
         while True:
             with page.lock:
-                init = False
+                page.pin()
+
                 index = page.get_slot_index_by_pk(pk)
 
                 if index != -1:
@@ -341,12 +387,16 @@ class heap_page(page):
                     size = cursor.read_int64()
                     cursor.at(pos)
 
+                    page.unpin()
                     return cursor.read(size)
 
                 if not page.has_next():
+                    page.unpin()
                     break
 
                 acc += page.tuple_count
+
+            page.unpin()
             page = ref_heap_page(self.next_page_id)
         
         return None
@@ -360,36 +410,47 @@ class heap_page(page):
 
         while True:
             with page.lock:
-                init = False
+                page.pin()
                 index = page.get_slot_index_by_pk(pk)
 
                 if index != -1:
+                    page.unpin()
                     return index + acc
 
                 if not page.has_next():
+                    page.unpin()
                     break
 
                 acc += page.tuple_count
+            
+            page.unpin()
             page = ref_heap_page(self.next_page_id)
         
         return -1
     
+    @classmethod
+    def read_tuple_buffer(cls, cursor, pos):
+        cursor.at(pos)
+        size = cursor.read_int64() 
+        cursor.at(pos)
+        return cursor.read(size)
+    
     def get_slot_index_by_pk(self, pk):
         cursor = buffer_cursor(_buffer(self))
+        self.pin()
 
         for idx, pos in enumerate(self.slots):
             if idx in self.deleted:
                 continue
 
-            cursor.at(pos)
-
-            size = cursor.read_int64() 
-            cursor.at(pos)
-            tuple_buffer = cursor.read(size)
+            tuple_buffer = heap_page.read_tuple_buffer(cursor, pos)
             _pk = HeapTuple.get_pk_from_buffer(tuple_buffer)
 
             if pk == _pk:
+                self.unpin()
                 return idx
+        
+        self.unpin()
         return -1 
 
     def update(self, pk, new_tuple):
@@ -402,6 +463,79 @@ class heap_page(page):
         
     def empty(self):
         return self.tuple_count == 0
+
+    def split_insert(self, t, ctx):
+        self.lock.acquire()
+        assert self.tuple_count > 1
+        
+        new_heap_page  = ctx.allocator.hpalloc()
+        new_heap_page.lock.acquire()
+
+        temp_heap_page = ctx.allocator.hpalloc(temp=True)
+        # TODO return temp heap page
+
+        tuples = []
+        cursor = buffer_cursor(self.buffer)
+
+        for pos in self.slots:
+            buffer = heap_page.read_tuple_buffer(cursor, pos)
+            tuples.append( ( StructuredTuple.get_pk_from_buffer(buffer), buffer) )
+        
+        tuples_sorted = sorted(tuples, key=lambda x: x[0])
+        mid_index = int(len(tuples_sorted) / 2)
+
+        grp0 = tuples_sorted[:mid_index]
+        grp0_min_key = grp0[0][0]
+
+        for idx, t0 in enumerate(grp0):
+            _, buffer = t0
+            size = len(buffer)
+
+            temp_heap_page.tuple_count = idx + 1
+            temp_heap_page.add_slot(size)
+            temp_heap_page.write_tuple_data(size, buffer) 
+
+        temp_heap_page.write_tuple_count()
+        temp_heap_page.mark_min_key(grp0_min_key)
+        temp_heap_page.update_header_buffer()
+
+        assert len(temp_heap_page.buffer) == PAGE_SIZE
+
+        self.buffer[:PAGE_SIZE] = temp_heap_page.buffer[:PAGE_SIZE]
+        self.mark_dirty_flag()
+
+        grp1 = tuples_sorted[mid_index:]
+        grp1_min_key = grp1[0][0]
+
+        for idx, t1 in enumerate(grp1):
+            _, buffer = t1
+            size = len(buffer)
+
+            new_heap_page.tuple_count = idx + 1
+            new_heap_page.add_slot(size)
+            new_heap_page.write_tuple_data(size, buffer) 
+
+        new_heap_page.write_tuple_count()
+        new_heap_page.mark_min_key(grp1_min_key)
+        new_heap_page.update_header_buffer()
+
+        target = None
+        if t.pk < grp1_min_key:
+            target = self
+        else:
+            target = new_heap_page
+
+        target.tuple_count += 1
+        target.add_slot(t.size)
+        target.write_tuple_data(t.size, t.buffer)
+        target.update_header_buffer()
+
+        self.lock.release()
+        new_heap_page.lock.release()
+
+        ctx.allocator.return_temp_heap_page(temp_heap_page)
+
+        return new_heap_page
         
     def insert(self, t, ctx=None, locking=True):
         locking and self.lock.acquire()
@@ -439,35 +573,41 @@ class heap_page(page):
         return "heap"
  
     def update_header_buffer(self):
+        self.pin()
         header_buffer = self.ser_header()
         assert len(header_buffer) == heap_page.HEAP_PAGE_HDR_SIZE
 
         self.buffer[:len(header_buffer)] = header_buffer
         self.mark_dirty_flag()
+        self.unpin()
     
     def set_min_key_buffer(self, min_key):
+        self.pin()
         self.cursor.at(heap_page.MIN_KEY_OFFSET)
         self.cursor.write_int64(min_key)
+        self.unpin()
     
     def mark_min_key(self, min_key):
         # min_key wrote in page header is for convinience of executor 
         # it is not garuanted that min_key is actually min key in this page.
         # responsibility is up to caller.
+        self.pin()
         self.min_key = min_key
         self.set_min_key_buffer(min_key)
+        self.unpin()
     
     def ser_header(self):
-        cursor = buffer_cursor()
+        with self.lock:
+            cursor = buffer_cursor()
 
-        cursor.write_int64_a(self.id)
-        cursor.write_int64_a(self.type)
-        cursor.write_int64_a(self.min_key)
-        cursor.write_int64_a(self.tuple_count)
-        cursor.write_int64_a(self.slot_cursor)
+            cursor.write_int64_a(self.id)
+            cursor.write_int64_a(self.type)
+            cursor.write_int64_a(self.min_key)
+            cursor.write_int64_a(self.tuple_count)
+            cursor.write_int64_a(self.slot_cursor)
 
-        assert len(cursor.buffer) == heap_page.HEAP_PAGE_HDR_SIZE
-
-        return cursor.buffer
+            assert len(cursor.buffer) == heap_page.HEAP_PAGE_HDR_SIZE
+            return cursor.buffer
     
     @classmethod
     def parse_header_buffer(cls, buffer):

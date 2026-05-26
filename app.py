@@ -20,7 +20,8 @@ simple_schema = Schema([
 ])
 
 blk = None
-ENABLE_WAL_SYSTEM = True
+from core.wal import set_auto_commit
+ENABLE_WAL_SYSTEM = False
 
 def get_test_keys():
     keys = [ 1,2,3,4,5,6,7,8,9,10 ]
@@ -143,6 +144,7 @@ def exec_command(cmd):
     
     elif ctype == "start":
         app = bootstrap_main(ENABLE_WAL_SYSTEM)
+        #set_auto_commit(lambda: app.cache_pool.autocommit, True)
         app.start_server()
         exit(0)
     
@@ -267,6 +269,14 @@ def exec_command(cmd):
 
         hpage.insert(HeapTuple(value))
         app.blk.write_page(hpage)
+
+    elif ctype == "objects":
+        set_log_disable()
+        app = bootstrap_main(False)
+        from core.catalog import read_sys_table
+        tuples = read_sys_table("objects")
+        for t in tuples:
+            print(t)
     
     elif ctype == "tables":
         set_log_disable()

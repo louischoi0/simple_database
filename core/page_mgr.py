@@ -4,6 +4,7 @@ from core.helper import _minkey
 from core.meta import  get_metablock
 from core.const import *
 from core.heap import heap_page
+from core.helper import _ptype
 import threading
 
 global alloc
@@ -12,6 +13,8 @@ _info = lambda x: info("page_mgr", x)
 
 alloc = None
 cache_pool = None
+
+TEMP_HEAP_PAGES_RETURNED = {}
 
 def global_palloc(type=0):
     global alloc
@@ -72,6 +75,8 @@ class page_allocator:
         self.blkdev = blkdev
         self.metablock = get_metablock()
         self.cache_pool = page_cache_pool(blkdev)
+
+        self.temp_ret_lock = threading.Lock()
     
     def sys_hpalloc_ref(self, page_id):
         if page_id > PAGE_MAX_SYS_ID:
@@ -109,8 +114,23 @@ class page_allocator:
 
         self.cache_pool.cache(pg)
         return pg
+    
+    def return_temp_heap_page(self, heap_page):
+        assert _ptype(heap_page) == PAGE_TYPE_HEAP
 
-    def hpalloc(self):
+        with self.temp_ret_lock:
+            heap_page.clear()
+            TEMP_HEAP_PAGES_RETURNED[_id(heap_page)] = heap_page
+
+    def hpalloc(self, temp=False):
+
+        if temp:
+            with self.temp_ret_lock:
+                if len(TEMP_HEAP_PAGES_RETURNED) > 0:
+                    temp_page = TEMP_HEAP_PAGES_RETURNED[TEMP_HEAP_PAGES_RETURNED.keys()[0]]
+                    temp_page.clear() 
+                    return temp_page
+
         new_page_id = self.metablock.inc() - 1
 
         if new_page_id < PAGE_MAX_SYS_ID:
@@ -118,9 +138,17 @@ class page_allocator:
 
         _info("heap page alloc: %d" % new_page_id)
         pg = heap_page(new_page_id)
+
         self.cache_pool.cache(pg)
 
         return pg
+
+    def ref_heap_page(self, id):
+        page = ref_page(id)
+        page = page.as_heap()
+        page.activate()
+
+        return page
 
 class page_cache_pool:
     def __init__(self, blkdev):

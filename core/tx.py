@@ -1,6 +1,7 @@
 import threading
 from enum import Enum
 from dataclasses import dataclass, field
+from core.meta import get_metablock
 
 global LAST_TXID
 
@@ -11,6 +12,13 @@ global g_transaction_mgr
 g_transaction_mgr = None
 TX_GENERATOR_LOCK = threading.Lock()
 LAST_TXID = 0
+
+UNDO_LOGS = {}
+
+class HeapTupleUndoRef:
+    def __init__(self, owner_oid, pk):
+        self.owner_oid = owner_oid
+        self.pk = pk
 
 class TxStatus(Enum):
     IN_PROGRESS = "in_progress"
@@ -41,6 +49,7 @@ class Transaction:
         self.commit_lsn = 0
         self.status = None
         self.aborted_flag = None
+        self.metablock = get_metablock()
 
     def set_xid(self, xid):
         self.xid = xid
@@ -63,15 +72,16 @@ class TransactionManager:
 
         self.current_clog_page = None
     
-    def write_transaction_status_flag(self, tx):
-        c = cursor.
-
+    #def write_transaction_status_flag(self, tx):
+    #    c = cursor.
     
     def next_xid(self):
         global LAST_TXID
 
         with TX_GENERATOR_LOCK:
             LAST_TXID += 1
+
+        self.metablock.set_oldest_xid_with_commit(LAST_TXID)
 
         return LAST_TXID
     
@@ -100,6 +110,7 @@ class TransactionManager:
         #xact.begin_lsn = lsn
 
         return xact
+
     def commit(self, xid):
         xact = Transaction()
         xact.xid = self.create_xid()
@@ -107,14 +118,17 @@ class TransactionManager:
         lsn = xlog_commit_transaction(xact.xid)
 
         xact.commit_lsn = lsn
-
         return xact
-
 
 def _init_transaction_system():
     global g_transaction_mgr
+    global LAST_TXID
+
     assert g_transaction_mgr is None
+
     g_transaction_mgr = TransactionManager()
+    LAST_TXID = g_transaction_mgr.metablock.oldest_xid
+
     return g_transaction_mgr
 
 def get_transaction_mgr():
