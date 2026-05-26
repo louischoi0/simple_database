@@ -16,6 +16,12 @@ class bt_cursor:
         self.ns = []
         self.count = 0
     
+    def copy(self):
+        cursor = bt_cursor()
+        cursor.ns = self.ns.copy()
+        cursor.count = self.count
+        return cursor
+    
     def size(self):
         return len(self.ns)
     
@@ -131,6 +137,49 @@ class bt_node:
 
                 ctx.wal_writer.write_xlog(xlog0)
                 ctx.wal_writer.write_xlog(xlog1)
+    
+    def remove_empty_node(self, page_id):
+        pass
+    
+    def drop_page(self, page_id, min_key):
+        target = self
+        cursor = bt_cursor()
+
+        if _ptype(target) == PAGE_TYPE_ROOT:
+            cursor.visit(target)
+
+        while True:
+            vnode_id = target.get_internal_node_to_go_down(min_key)
+
+            if vnode_id == NULL_PAGE:
+                raise Exception(f"not found heap page#{page_id}(min_key={min_key}) to drop in btree")
+
+            vnode = ref_page(vnode_id)
+
+            if not is_btree_page(vnode):
+                if _minkey(vnode) != min_key or _id(vnode) == page_id:
+                    raise Exception("something went wrong.")
+                break
+
+        drop_index = target.slots.index(vnode_id)
+
+        if drop_index == 0 and len(target.slots) > 1:
+            target.update_min_key_upper_nodes(ref_minkey(target.slots[1]), cursor.copy())
+
+            target.slots = target.slots[1:]
+            target.keys = target.keys[1:]
+            target.key_count = len(target.keys)
+        
+        elif drop_index == 0 and len(target.slots) == 1:
+            target.slots = []
+            target.keys = []
+            target.key_count = 0
+
+            return self.remove_empty_node(_id(target))
+        
+        else:
+            key_index = drop_index - 1
+
 
     def insert_phase_zero(self, inode, ctx=None):
         target = self 
@@ -489,6 +538,7 @@ class bt_node:
         target = self
         
         while not is_btree_data_page(target):
+            target.acquire_lock()
             vnode_id = target.get_internal_node_to_go_down(key)
 
             if vnode_id == NULL_PAGE:
@@ -497,9 +547,13 @@ class bt_node:
             vnode = ref_page(vnode_id)
             
             vnode = bt_node.as_btnode(vnode)
+            target.release_lock()
+
             target = vnode
 
         heap_page_id = target.get_internal_node_to_go_down(key)
+        target.release_lock()
+
         if heap_page_id == NULL_PAGE:
             return None
 

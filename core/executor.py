@@ -78,10 +78,6 @@ class HeapPageUpdateState(QueryExecState):
     def exec(self, ctx: QueryExecutionCtx):
         _heap_page = ctx.allocator.ref_heap_page(self.heap_page_id)
 
-
-
-
-
 class HeapPageInsertState(QueryExecState):
     def __init__(self, table_access, tuple):
         super(HeapPageInsertState, self).__init__(table_access)

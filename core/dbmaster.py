@@ -6,7 +6,6 @@ from core.page_mgr import _init_mgr_module
 from core.wal import _init_wal_system
 from core.lock import _init_lock_system
 from core.meta import _init_meta_system
-from core.server import DBServer
 from core.tx import _init_transaction_system
 
 import threading
@@ -65,6 +64,7 @@ class DBMaster:
         port         = int(os.getenv("DB_PORT", "5678"))
         worker_count = int(os.getenv("DB_WORKERS", "4"))
 
+        from core.server import DBServer
         asyncio.run(DBServer(app=self, host=host, port=port, worker_count=worker_count).run())
 
 

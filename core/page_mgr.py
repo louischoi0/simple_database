@@ -4,7 +4,7 @@ from core.helper import _minkey
 from core.meta import  get_metablock
 from core.const import *
 from core.heap import heap_page
-from core.helper import _ptype
+from core.helper import _ptype, _id
 import threading
 
 global alloc
