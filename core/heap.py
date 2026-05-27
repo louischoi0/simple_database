@@ -346,7 +346,6 @@ class heap_page(page):
         return self.capacity() >= size
 
     def rollback_insert(self, slot_index):
-
         with self.lock:
             self.pin()
             cursor = buffer_cursor(self.buffer)
@@ -597,17 +596,16 @@ class heap_page(page):
         self.unpin()
     
     def ser_header(self):
-        with self.lock:
-            cursor = buffer_cursor()
+        cursor = buffer_cursor()
 
-            cursor.write_int64_a(self.id)
-            cursor.write_int64_a(self.type)
-            cursor.write_int64_a(self.min_key)
-            cursor.write_int64_a(self.tuple_count)
-            cursor.write_int64_a(self.slot_cursor)
+        cursor.write_int64_a(self.id)
+        cursor.write_int64_a(self.type)
+        cursor.write_int64_a(self.min_key)
+        cursor.write_int64_a(self.tuple_count)
+        cursor.write_int64_a(self.slot_cursor)
 
-            assert len(cursor.buffer) == heap_page.HEAP_PAGE_HDR_SIZE
-            return cursor.buffer
+        assert len(cursor.buffer) == heap_page.HEAP_PAGE_HDR_SIZE
+        return cursor.buffer
     
     @classmethod
     def parse_header_buffer(cls, buffer):

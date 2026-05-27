@@ -80,8 +80,6 @@ class HeapPageUpdateState(QueryExecState):
 
 
 
-
-
 class HeapPageInsertState(QueryExecState):
     def __init__(self, table_access, tuple):
         super(HeapPageInsertState, self).__init__(table_access)
@@ -152,12 +150,12 @@ class BtreePageInsertTupleState(QueryExecState):
                 new_heap_page = global_hpalloc()
                 new_heap_page.insert(self.tuple, ctx=ctx)
                 new_heap_page.mark_min_key(self.tuple.pk)
-                assert c.size() == 1
 
             else:
                 new_heap_page = heap_page.split_insert(self.tuple, ctx)
 
             split_node, c, _ = target_page.insert_phase_zero(new_heap_page, ctx=ctx)
+            assert c.size() == 1
 
             if split_node is None:
                 return self.set_result(self.tuple.pk)

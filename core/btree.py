@@ -208,7 +208,7 @@ class bt_node:
 
             if split_node is None:
                 if insert_index == 0:
-                    target.update_min_key_upper_nodes(insert_min_key)
+                    target.update_min_key_upper_nodes(insert_min_key, cursor)
                 return target
 
             ntarget = cursor.pop_try()

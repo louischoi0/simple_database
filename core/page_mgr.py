@@ -4,7 +4,7 @@ from core.helper import _minkey
 from core.meta import  get_metablock
 from core.const import *
 from core.heap import heap_page
-from core.helper import _ptype
+from core.helper import _ptype, _id
 import threading
 
 global alloc
@@ -124,10 +124,10 @@ class page_allocator:
 
     def hpalloc(self, temp=False):
 
-        if temp:
+        if False and temp:
             with self.temp_ret_lock:
                 if len(TEMP_HEAP_PAGES_RETURNED) > 0:
-                    temp_page = TEMP_HEAP_PAGES_RETURNED[TEMP_HEAP_PAGES_RETURNED.keys()[0]]
+                    temp_page = TEMP_HEAP_PAGES_RETURNED[next(iter(TEMP_HEAP_PAGES_RETURNED))]
                     temp_page.clear() 
                     return temp_page
 

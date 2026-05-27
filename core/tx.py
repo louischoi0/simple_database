@@ -49,7 +49,6 @@ class Transaction:
         self.commit_lsn = 0
         self.status = None
         self.aborted_flag = None
-        self.metablock = get_metablock()
 
     def set_xid(self, xid):
         self.xid = xid
@@ -71,6 +70,7 @@ class TransactionManager:
         self.clog_pages = []
 
         self.current_clog_page = None
+        self.metablock = get_metablock()
     
     #def write_transaction_status_flag(self, tx):
     #    c = cursor.
