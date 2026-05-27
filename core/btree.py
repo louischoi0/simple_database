@@ -138,10 +138,19 @@ class bt_node:
                 ctx.wal_writer.write_xlog(xlog0)
                 ctx.wal_writer.write_xlog(xlog1)
     
-    def remove_empty_node(self, page_id):
-        pass
+    @classmethod
+    def remove_empty_node(cls, page_id, cursor):
+        target = cursor.try_pop()
+
+        assert target is not None
+
+        try:
+            target.slots.index(page_id)
+        except:
+            raise Exception("something went wrong")
+
     
-    def drop_page(self, page_id, min_key):
+    def drop_heap_page(self, page_id, min_key):
         target = self
         cursor = bt_cursor()
 
@@ -160,6 +169,10 @@ class bt_node:
                 if _minkey(vnode) != min_key or _id(vnode) == page_id:
                     raise Exception("something went wrong.")
                 break
+                
+            else:
+                cursor.visit(target)
+                target = vnode
 
         drop_index = target.slots.index(vnode_id)
 
@@ -175,10 +188,14 @@ class bt_node:
             target.keys = []
             target.key_count = 0
 
-            return self.remove_empty_node(_id(target))
-        
+            return bt_node.remove_empty_node(_id(target), cursor.copy())
+
         else:
             key_index = drop_index - 1
+
+            self.keys = self.keys[:key_index] + self.keys[key_index + 1:]
+            self.slots = self.slots[:drop_index] + self.slots[drop_index+ 1:]
+            self.key_count = len(self.keys)
 
 
     def insert_phase_zero(self, inode, ctx=None):

@@ -65,13 +65,11 @@ class StructuredTuple(HeapTuple):
     def get_null_flag_buffer(self):
         cursor = buffer_cursor(self.buffer)
         cursor.at(HeapTuple.HEAP_TUPLE_HEADER_SIZE - 8)
-
         return cursor.read_int64()
     
     def get_null_flag(self, colnum):
         value = self.get_null_flag_buffer()
         return bool(value & (1 << colnum))
-
     
     def set_null_flag(self, colnum, flag):
         cursor = buffer_cursor(self.buffer)
@@ -665,6 +663,5 @@ def insert_with_grow(alloc_func, heap_page_to_insert, t, ctx=None):
         heap_page_to_insert.release_lock()
         heap_page_to_insert.insert(t, ctx=ctx)
         return heap_page_to_insert
-
 
 
