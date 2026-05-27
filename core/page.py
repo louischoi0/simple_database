@@ -58,7 +58,6 @@ def get_page_name(type):
 
 class page:
     def __init__(self, page_id, type, min_key):
-
         self.id = page_id
         self.min_key = min_key
         self.type = type
@@ -72,7 +71,10 @@ class page:
     def checksum(self):
         import hashlib
         enc = hashlib.md5()
+        self.pin()
         enc.update(self.buffer)
+        self.unpin()
+
         return enc.hexdigest()
     
     def cursor(self):
@@ -95,10 +97,14 @@ class page:
         return "page"
     
     def update_header_buffer(self):
+        self.pin()
+
         header_buffer = self.ser_header()
         assert len(header_buffer) == HDR_SIZE
         self.buffer[:len(header_buffer)] = header_buffer
         self.mark_dirty_flag()
+
+        self.unpin()
     
     def mark_dirty_flag(self):
         self.dirty = True 

@@ -5,6 +5,7 @@ from core.meta import  get_metablock
 from core.const import *
 from core.heap import heap_page
 from core.helper import _ptype, _id
+from core.extent import Extent, RotateExtent
 import threading
 
 global alloc
@@ -100,6 +101,10 @@ class page_allocator:
         pg = heap_page(page_id)
         self.cache_pool.cache(pg)
         return pg
+    
+    def alloc_sys_rotate_extent(self, page_id, page_num):
+        buffer = bytearray(b"\x00" * page_num* PAGE_SIZE)
+        return RotateExtent(page_id, page_num, buffer)
         
     def palloc(self, page_type=0):
         new_page_id = self.metablock.inc() - 1
@@ -122,7 +127,7 @@ class page_allocator:
             heap_page.clear()
             TEMP_HEAP_PAGES_RETURNED[_id(heap_page)] = heap_page
 
-    def hpalloc(self, temp=False):
+    def hpalloc(self, temp=False) -> heap_page:
 
         if False and temp:
             with self.temp_ret_lock:
@@ -143,7 +148,7 @@ class page_allocator:
 
         return pg
 
-    def ref_heap_page(self, id):
+    def ref_heap_page(self, id) -> heap_page:
         page = ref_page(id)
         page = page.as_heap()
         page.activate()
@@ -178,5 +183,4 @@ def _init_mgr_module(blkdev):
 
     alloc = page_allocator(blkdev)
     cache_pool = alloc.cache_pool
-
     return alloc, cache_pool

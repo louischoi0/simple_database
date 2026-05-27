@@ -60,7 +60,6 @@ class ObjectLock:
                 from time import sleep
                 sleep(0.01)
 
-
     def release(self):
         with MEM_POOL_LOCK:    
             assert self.held
