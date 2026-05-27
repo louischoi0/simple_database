@@ -56,4 +56,4 @@ class RotateExtent(Extent):
 
         self.inc(size)
         
-
+        return pos

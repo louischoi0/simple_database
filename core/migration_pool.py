@@ -13,6 +13,7 @@ class MigrationPool:
 
         # (owner_oid, pk)
         self.pool = {}
+        self.tuple_pos = {}
         self.live_border = 0
 
     def get(self, owner_oid, pk):
@@ -22,14 +23,15 @@ class MigrationPool:
     def migrate(self, owner_oid, pk, heap_tuple):
         with self.lock:
             self.pool[(owner_oid, pk)] = heap_tuple
-            self.callback(heap_tuple)
+            self.callback(owner_oid, pk, heap_tuple)
     
-    def callback(self, heap_tuple: HeapTuple):
-        self.extent.write_buffer(heap_tuple.buffer)
+    def callback(self, owner_oid, pk, heap_tuple: HeapTuple):
+        self.tuple_pos[(owner_oid, pk)] = self.extent.write_buffer(heap_tuple.buffer)
     
     def clear_tuple(self, owner_oid, pk):
         with self.lock:
             del self.pool[(owner_oid, pk)]
+            del self.tuple_pos[(owner_oid, pk)]
 
 def _init_migration_pool(allocator: page_allocator):
     global _g_migration_pool
