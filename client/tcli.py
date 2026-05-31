@@ -19,6 +19,10 @@ def create_request__query_select(table_oid):
     request_id = str(uuid.uuid4())
     return {"request_id": request_id, "command": "select", "payload": { "table_oid": table_oid } }
 
+def create_request__query_get(table_oid, key):
+    request_id = str(uuid.uuid4())
+    return {"request_id": request_id, "command": "get", "payload": { "table_oid": table_oid, "key": int(key) } }
+
 def create_request__bt_new_heap_page(table_oid, new_min_key):
     request_id = str(uuid.uuid4())
     return {"request_id": request_id, "command": "bt_new_heap_page", "payload": { "table_oid": table_oid, "new_min_key": new_min_key } }
@@ -47,6 +51,12 @@ async def scan_heap(args):
         res = await send_request(ws, request)
         for i in res["data"]:
             print(i)
+
+async def get(args):
+    async with websockets.connect(SERVER_URI) as ws:
+        request = create_request__query_get(4001, args[0])
+        res = await send_request(ws, request)
+        print(res["data"])
 
 async def select(args):
     async with websockets.connect(SERVER_URI) as ws:
@@ -96,12 +106,16 @@ async def scenario_zero(args):
             print(k)
             request = create_request__bt_insert_tuple(4001, k)
             res = await send_request(ws, request)
+
+            #from time import sleep
+            #sleep(0.5)
             print(res)
 
 # ── dispatch ──────────────────────────────────────────────────────────────────
 
 COMMANDS = {
     "select":        (select,        ""),
+    "get":           (get,  "<key>"),
     "i_select":      (i_select,      "<entry_pg_id> <table_oid>"),
     "scan_index":    (scan_index,    "<entry_pg_id>"),
     "scan_heap":     (scan_heap, "<page_id>"),

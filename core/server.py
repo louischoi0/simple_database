@@ -8,7 +8,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from core.executor import QueryExecutionCtx, BtreePageExpandState, init_insert, BtreePageScanState, BuildIndexState
+from core.executor import QueryExecutionCtx, BtreePageExpandState, init_insert, BtreePageScanState, BuildIndexState, BtreePageGetTupleState
 from core.executor import BtreeIndexPageScanState
 from core.tx import generate_xid
 from core.catalog import get_public_namespace, init_scan_index
@@ -114,6 +114,15 @@ async def execute_command(app, command: str, payload: dict[str, Any]) -> WorkerR
 
         return WorkerResult(request_id="", status="ok", data={})
     
+    elif command == "get":
+        ctx = create_new_ctx(app)
+        table_access = init_table_access(get_public_namespace(), payload["table_oid"], lockmode=None)
+
+        ex = BtreePageGetTupleState(table_access, payload["key"])
+        res = ex.exec(ctx)
+
+        return WorkerResult(request_id="", status="ok", data=ex.result)
+    
     elif command == "scan_heap":
         ctx = create_new_ctx(app)
         table_access = init_table_access(get_public_namespace(), payload["table_oid"], lockmode=None)
@@ -186,7 +195,8 @@ class Worker:
 
 class WorkerPool:
     def __init__(self, app, size: int) -> None:
-        self.size = size
+        #self.size = size
+        self.size = 1
         self.app = app
         self.request_queue: asyncio.Queue[ClientRequest] = asyncio.Queue()
         self._workers: list[Worker] = []

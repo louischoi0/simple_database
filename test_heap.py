@@ -19,7 +19,7 @@ test_table_schema = Schema([
 
 data_template = {
     "student_id": 0,
-    "name": "student_",
+    "name": "s_",
     "grade": 1,
     #"grade2": 2,
 }
@@ -92,6 +92,34 @@ def test_xmin_with_ctx(app):
     for i in read_datas:
         assert i.xmin == TEST_TXID
 
+def test_concurrent_insert(app):
+    datas = []
+    ctx = QueryExecutionCtx(72, app.alloc, app.wal_writer)
+    heap: HeapPage = app.alloc.hpalloc()
+
+    def work(n):
+        for i in range(n*10, 10*(n+1)):
+            item = data_template.copy()
+            item["student_id"] = i
+            item["name"] += str(i)
+            item["grade"] = i % 4
+
+            item = StructuredTuple.load(test_table_schema, item)
+            item.struct(test_table_schema)
+
+            heap.insert(item)
+
+    import threading 
+    ths = []
+    for i in range(4):
+        th = threading.Thread(target=lambda: work(i))
+        ths.append(th)
+        th.start()
+    
+    for th in ths:
+        th.join()
+
+
 def test_split_insert(app):
     datas = []
     ctx = QueryExecutionCtx(72, app.alloc, app.wal_writer)
@@ -120,11 +148,21 @@ def test_split_insert(app):
     new_item["name"] += str(i)
     new_item["grade"] = i % 4
 
-    new_item = StructuredTuple.load(test_table_schema, new_item)
-    new_item.struct(test_table_schema)
+    new_item_t = StructuredTuple.load(test_table_schema, new_item)
+    new_item_t.struct(test_table_schema)
 
-    new_heap = heap.split_insert(new_item, ctx)
+    new_heap = heap.split_insert(new_item_t, ctx)
     print(f"new_heap: id={new_heap.id}, count={new_heap.tuple_count}")
+
+    new_item["student_id"] = 11
+    new_item_t = StructuredTuple.load(test_table_schema, new_item)
+    new_item_t.struct(test_table_schema)
+    new_heap.insert(new_item_t)
+
+    read_datas = new_heap.raw_map(lambda buffer: StructuredTuple.parse(buffer).struct(test_table_schema))
+    for d in read_datas:
+        print(d)
+
 
 def test_heap_page_grow(app):
     datas = []
@@ -234,6 +272,7 @@ if __name__ == '__main__':
     #test_heap_page_grow(app)
     #test_xmin_with_ctx(app)
     test_split_insert(app)
+    #test_concurrent_insert(app)
 
     app.cache_pool.autocommit()
     app.meta.commit_metablock()

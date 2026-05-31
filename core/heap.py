@@ -176,7 +176,7 @@ class heap_page(page):
     
     def set_next_page_pointer(self, next_page_id):
         self.cursor.at(heap_page.HEAP_NEXT_PAGE_POINTER_OFFSET)
-        self.next_page_id = next
+        self.next_page_id = next_page_id
         self.cursor.write_int64(next_page_id)
     
     def has_next(self):
@@ -302,6 +302,21 @@ class heap_page(page):
             self.activated = True        
             self.read_next_page_pointer()
             self.unpin()
+
+    def validate__raise(self):
+        if len(self.slots) != self.tuple_count:
+            raise Exception(f"tuple count inconsitent {self.tuple_count}, {len(self.slots)}")
+
+        cursor = buffer_cursor(self.buffer)
+        
+        for s in self.slots:
+            cursor.at(s)
+
+            size = cursor.read_int64()
+
+            if r != s:
+                raise Exception(f"tuple size header not consistent {r}, {s}")
+
     
     def delete_tuple_by_index(self, index):
         self.pin()
@@ -461,6 +476,15 @@ class heap_page(page):
     def empty(self):
         return self.tuple_count == 0
 
+    def copy_from(self, source):
+        self.buffer[:PAGE_SIZE] = source.buffer[:PAGE_SIZE]
+        self.slots = source.slots
+        self.tuple_count = source.tuple_count
+        self.deleted = source.deleted
+        self.next_page_id = source.next_page_id
+        self.activated = source.activated
+        self.update_header_buffer()
+
     def split_insert(self, t, ctx):
         self.lock.acquire()
         assert self.tuple_count > 1
@@ -498,8 +522,7 @@ class heap_page(page):
 
         assert len(temp_heap_page.buffer) == PAGE_SIZE
 
-        self.buffer[:PAGE_SIZE] = temp_heap_page.buffer[:PAGE_SIZE]
-        self.mark_dirty_flag()
+        self.copy_from(temp_heap_page)
 
         grp1 = tuples_sorted[mid_index:]
         grp1_min_key = grp1[0][0]
@@ -562,6 +585,7 @@ class heap_page(page):
         if self.empty() and ctx is not None:
             xlog_full_page_write(ctx.wal_writer, ctx.xid, self)
 
+        assert len(self.slots) == self.tuple_count
         locking and self.lock.release()
 
         return slot_index

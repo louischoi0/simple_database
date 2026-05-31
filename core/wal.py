@@ -223,15 +223,15 @@ class XLogCheckpointer:
                     self.meta.set_begin_lsn_with_commit(xlog.lsn)
                     #assert xlog.lsn == self.previous_lsn + 1
 
-                    self.do_commit_xlog(xlog)
-                    self.set_current_cursor_pos(cursor)
-                    self.meta.set_last_committed_wal_seg_pos_with_commit(self.cursor_pos)
-                    self.previous_lsn = xlog.lsn
-                    _info(f"finished xlog commit lsn={xlog.lsn} len={len(xlog_buffer)} cursor_pos={self.cursor_pos}")
-
                     if AUTO_COMMIT:
                         AUTO_COMMIT_FUNC()
 
+                    else:
+                        self.do_commit_xlog(xlog)
+                        self.set_current_cursor_pos(cursor)
+                        self.meta.set_last_committed_wal_seg_pos_with_commit(self.cursor_pos)
+                        self.previous_lsn = xlog.lsn
+                        _info(f"finished xlog commit lsn={xlog.lsn} len={len(xlog_buffer)} cursor_pos={self.cursor_pos}")
 
     def set_current_cursor_pos(self, cursor):
         self.cursor_pos = cursor.c

@@ -141,34 +141,30 @@ class BtreePageInsertTupleState(QueryExecState):
         heap_page_index = target_page.find_leaf_index_to_insert_page(self.tuple.pk)
         heap_page: HeapPage = ref_heap_page(target_page.slots[heap_page_index-1])
 
-        if (heap_page_index == target_page.key_count + 1 and (heap_page.usage_pct() > BTREE_ALLOC_HEAP_FACTOR or not heap_page.possible(self.tuple.size))) or heap_page_index == 0:
-            _info(f"alloc new heap data page in {_id(target_page)}")
+        if heap_page_index == 0 or not heap_page.possible(self.tuple.pk):
+            new_heap_page = global_hpalloc()
+            new_heap_page.insert(self.tuple, ctx=ctx)
+            new_heap_page.mark_min_key(self.tuple.pk)
 
-            if heap_page_index == 0:
-                new_heap_page = global_hpalloc()
-                new_heap_page.insert(self.tuple, ctx=ctx)
-                new_heap_page.mark_min_key(self.tuple.pk)
+            new_root = btree_root_page.insert(new_heap_page, ctx)
 
-            else:
-                new_heap_page = heap_page.split_insert(self.tuple, ctx)
+            if _id(new_root) != _id(btree_root_page):
+                raw_update_sys_tables_table_desc(self.table_access.oid, _id(new_root))
 
-            split_node, c, _ = target_page.insert_phase_zero(new_heap_page, ctx=ctx)
-            assert c.size() == 1
+        elif (heap_page_index == target_page.key_count + 1 and (heap_page.usage_pct() > BTREE_ALLOC_HEAP_FACTOR or not heap_page.possible(self.tuple.size))) :
+            new_heap_page = heap_page.split_insert(self.tuple, ctx)
+            _info(f"heap page has been splitted from {_id(heap_page)} to {_id(new_heap_page)}")
 
-            if split_node is None:
-                return self.set_result(self.tuple.pk)
-
-            new_root = bt_node.merge_split_node(self.tuple.pk, cursor, split_node, ctx=ctx)
+            new_root = btree_root_page.insert(new_heap_page, ctx)
 
             if _id(new_root) != _id(btree_root_page):
                 raw_update_sys_tables_table_desc(self.table_access.oid, _id(new_root))
 
         else:
             _info(f"insert tuple #{self.tuple.pk} to exisiting heap page #{heap_page.id}")
-            #insert_with_grow(global_hpalloc, heap_page, self.tuple)
             ret = heap_page.insert(self.tuple)
             assert ret >= 0
-
+        
         return self.set_result(self.tuple.pk)
     
 class BtreePageGetTupleState(QueryExecState):
@@ -184,7 +180,11 @@ class BtreePageGetTupleState(QueryExecState):
         btree_root_page: bt_node = ref_btree_page(self.table_access.desc_pg_id)
         _res = btree_root_page.search(self.pk)
 
-        self.set_result( StructuredTuple.parse(_res, self.table_access.schema) )
+        if _res is None:
+            _info("tuple #{self.pk} is not found")
+        else:
+            _info(f"tuple #{self.pk} found: {StructuredTuple.parse(_res, self.table_access.schema).struct(self.table_access.schema)}")
+            self.set_result( StructuredTuple.parse(_res, self.table_access.schema).struct(self.table_access.schema) )
 
         return NO_ERR
 

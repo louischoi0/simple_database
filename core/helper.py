@@ -28,3 +28,14 @@ def _checksum(page):
     if hasattr(page, "page"):
         return page.page.checksum
     return page.checksum
+
+def _acquire_lock(page):
+    if hasattr(page, "page"):
+        return page.page.acquire_lock()
+
+    return page.acquire_lock()
+
+def _release_lock(page):
+    if hasattr(page, "page"):
+        return page.page.release_lock()
+    return page.release_lock()

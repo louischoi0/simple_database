@@ -74,6 +74,21 @@ def insert_new_heap_page_to_root(blk, root_page, initial_tuple):
 
     blk.write_page(h)
     blk.write_page(btn)
+
+def test_insert_heap_page_btree(ctx):
+    from core.executor import QueryExecutionCtx
+    from core.dbmaster import DBMaster
+
+    app = DBMaster()
+    app.disable_background_proc()
+    app.activate()
+
+    ctx = QueryExecutionCtx(72, app.alloc, app.wal_writer)
+    min_keys = [ 209, 73, 74, 246, 205, 111, 1, 7, 9, 51, 151, 91, 103, 288, 254, 36, 219, 258, 124 ]
+
+
+
+
   
 if __name__ == "__main__":
     app = kdapp(TEST_DRIVER)

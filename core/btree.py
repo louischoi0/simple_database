@@ -1,7 +1,7 @@
 from core.const import *
 from core.page import is_btree_page, page, is_heap_page, is_btree_data_page
 from core.page_mgr import ref_page, ref_minkey, ref_btree_page
-from core.helper import _buffer, _ptype, _minkey, _id
+from core.helper import _buffer, _ptype, _minkey, _id, _release_lock, _acquire_lock
 from core.page_mgr import global_palloc, ref_heap_page
 from core.blk import get_blk_diver
 from core.wal import xlog_full_page_write
@@ -315,7 +315,8 @@ class bt_node:
                 self.update_min_key_upper_nodes(insert_min_key, cursor)
             return self
 
-        return bt_node.merge_split_node(insert_min_key, cursor, split_node)
+        new_root_btn = bt_node.merge_split_node(insert_min_key, cursor, split_node)
+        return new_root_btn if _ptype(new_root_btn) == PAGE_TYPE_ROOT else self
         
     def set_page_type(self, type):
         self.page.type = type
@@ -447,8 +448,8 @@ class bt_node:
             node_pg = ref_page(node_id)
             k = _minkey(node_pg)
             
-            if tuple_key == k:
-                raise Exception(f"duplicated key error {k}")
+            #if tuple_key == k:
+            #    raise Exception(f"duplicated key error {k} in {_id(node_pg)}")
 
             if tuple_key < k:
                 return idx
@@ -551,27 +552,27 @@ class bt_node:
     
     def search(self, key, ctx=None) -> bytearray| None:
         from core.heap import heap_page as HeapPage
-
         target = self
+        _acquire_lock(target)
         
         while not is_btree_data_page(target):
-            target.acquire_lock()
             vnode_id = target.get_internal_node_to_go_down(key)
 
             if vnode_id == NULL_PAGE:
+                _release_lock(target)
                 return None
 
             vnode = ref_page(vnode_id)
-            
             vnode = bt_node.as_btnode(vnode)
-            target.release_lock()
+            _release_lock(target)
 
             target = vnode
+            _acquire_lock(target)
 
         heap_page_id = target.get_internal_node_to_go_down(key)
-        target.release_lock()
 
         if heap_page_id == NULL_PAGE:
+            _release_lock(target)
             return None
 
         heap_page = ref_heap_page(heap_page_id)
@@ -582,6 +583,8 @@ class bt_node:
         buffer = heap_page.raw_get(key)
 
         if ctx is not None and not HeapPage.is_visible(ctx, buffer):
+            _release_lock(target)
             return None
 
+        _release_lock(target)
         return buffer
