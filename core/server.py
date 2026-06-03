@@ -9,13 +9,14 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from core.executor import QueryExecutionCtx, BtreePageExpandState, init_insert, BtreePageScanState, BuildIndexState, BtreePageGetTupleState
-from core.executor import BtreeIndexPageScanState
+from core.executor import BtreeIndexPageScanState, HeapPageUpdateState
 from core.tx import generate_xid
 from core.catalog import get_public_namespace, init_scan_index
 from utils.logging import info
 from core.catalog import init_table_access, create_index
 from core.page_mgr import ref_heap_page
 from core.heap import StructuredTuple
+from core.dbmaster import DBMaster
 import traceback
 
 import websockets
@@ -44,14 +45,12 @@ class WorkerResult:
 
 def create_new_ctx(app) -> QueryExecutionCtx:
     xid = generate_xid()
-    return QueryExecutionCtx(xid=xid, wal_writer=app.wal_writer, allocator=app.alloc)
-
-#def begin_transaction(ctx) ->
+    return QueryExecutionCtx(xid=xid, wal_writer=app.wal_writer, allocator=app.alloc, tx_mgr=app.tx_mgr)
 
 def command_callback(app):
     app.cache_pool.autocommit()
 
-async def execute_command(app, command: str, payload: dict[str, Any]) -> WorkerResult:
+async def execute_command(app: DBMaster, command: str, payload: dict[str, Any]) -> WorkerResult:
     if command == "ping":
         return WorkerResult(request_id="", status="ok", data={"pong": True})
     
@@ -87,6 +86,15 @@ async def execute_command(app, command: str, payload: dict[str, Any]) -> WorkerR
 
         data = list( x.struct(table_access.schema) for x in  execution.result )
         return WorkerResult(request_id="", status="ok", data=data)
+    
+    elif command == "update_heap_tuple":
+        ctx = create_new_ctx(app)
+        table_access = init_table_access(get_public_namespace(), payload["owner_oid"], lockmode=1)
+        execution = HeapPageUpdateState(table_access, payload["page_id"], payload["pk"], payload["new_tuple"])
+        execution.exec(ctx)
+        execution.on_finished()
+
+        return WorkerResult(request_id="", status="ok", data=execution.result)
     
     elif command == "i_select":
         ctx = create_new_ctx(app)
@@ -143,6 +151,10 @@ async def execute_command(app, command: str, payload: dict[str, Any]) -> WorkerR
 
         data = list( x.struct(table_access.schema) for x in  execution.result )
         return WorkerResult(request_id="", status="ok", data=data)
+    
+    elif command == "list_undo_logs":
+        undo_logs = app.tx_mgr.get_undo_logs()
+        return WorkerResult(request_id="", status="ok", data=undo_logs)
     
     return WorkerResult(
         request_id="",

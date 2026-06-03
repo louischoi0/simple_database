@@ -2,6 +2,10 @@ import threading
 from enum import Enum
 from dataclasses import dataclass, field
 from core.meta import get_metablock
+from core.heap import StructuredTuple
+from core.const import PAGE_SIZE
+from utils import buffer_cursor
+from utils.logging import info
 
 global LAST_TXID
 
@@ -12,6 +16,8 @@ global g_transaction_mgr
 g_transaction_mgr = None
 TX_GENERATOR_LOCK = threading.Lock()
 LAST_TXID = 0
+
+_info = lambda *x: info("txmgr", *x)
 
 UNDO_LOGS = {}
 
@@ -72,8 +78,29 @@ class TransactionManager:
         self.current_clog_page = None
         self.metablock = get_metablock()
     
-    #def write_transaction_status_flag(self, tx):
-    #    c = cursor.
+    def get_undo_logs(self):
+        return UNDO_LOGS
+    
+    def append_undo_log(self, undo, owner_oid, pk):
+        if owner_oid not in UNDO_LOGS:
+            UNDO_LOGS[owner_oid] = {}
+        
+        if pk not in UNDO_LOGS[owner_oid]:
+            UNDO_LOGS[owner_oid] = []
+
+        xmin, xmax = StructuredTuple.get_minmax_from_buffer(undo.old_tuple_buffer)
+        UNDO_LOGS[owner_oid][pk].append( ( (xmin, xmax),  undo))
+    
+    def write_transaction_status_flag(self, xid, status):
+        page_id = xid // PAGE_SIZE
+        offset = xid % PAGE_SIZE
+
+        page = self.clog_pages[page_id]
+
+        cursor = buffer_cursor(page.buffer)
+        cursor.at(offset)
+
+        cursor.write_bit(status == TxStatus.COMMITTED)
     
     def next_xid(self):
         global LAST_TXID
@@ -116,6 +143,7 @@ class TransactionManager:
         xact.xid = self.create_xid()
 
         lsn = xlog_commit_transaction(xact.xid)
+        self.write_transaction_status_flag(xid, TxStatus.COMMITTED)
 
         xact.commit_lsn = lsn
         return xact
@@ -128,6 +156,7 @@ def _init_transaction_system():
 
     g_transaction_mgr = TransactionManager()
     LAST_TXID = g_transaction_mgr.metablock.oldest_xid
+    _info(f"last txid: {LAST_TXID}")
 
     return g_transaction_mgr
 

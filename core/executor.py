@@ -1,5 +1,5 @@
 from core.catalog import Column, get_type, init_table_access
-from core.heap import StructuredTuple, heap_page as HeapPage
+from core.heap import StructuredTuple, heap_page as HeapPage, HeapTuple
 from core.page_mgr import ref_heap_page, ref_btree_page, global_hpalloc, page_allocator, ref_page
 from core.catalog import get_table_schema_from_cache, is_table_clustered_heap, is_table_clustered_btree, raw_build_schema_from_sys_columns
 from core.catalog import raw_update_sys_tables_table_desc, sys_int64_index_schema, TableAccess
@@ -8,6 +8,8 @@ from core.heap import insert_with_grow
 from core.helper import _ptype, _id
 from core.const import *
 from core.btree import bt_node, bt_cursor
+from core.tx import TransactionManager
+from enum import Enum
 
 from dataclasses import dataclass
 from utils.logging import info
@@ -17,6 +19,16 @@ IndexValueCol = sys_int64_index_schema.col_map["value"]
 
 NO_ERR = 0
 BTREE_ALLOC_HEAP_FACTOR = 0.05
+
+
+class ExecutionError:
+
+    NO_HEAP_TUPLE = 1001
+
+
+    def __init__(self, code, msg):
+        self.code = code
+        self.msg = msg
 
 class QueryOperator:
     def __init__(self, name, *args):
@@ -53,6 +65,7 @@ class QueryExecState:
     def __init__(self, table_access, *args, **kwargs):
         self.table_access = table_access
         self.result = None
+        self.error = None
     
     def on_finished(self):
         if self.table_access.obj_lock is not None:
@@ -61,15 +74,31 @@ class QueryExecState:
     def set_result(self, res):
         self.result = res
         return NO_ERR
+    
+    def set_error(self, error):
+        self.error = error
+        return error.code
 
 @dataclass
 class QueryExecutionCtx:
     xid: int
     allocator: page_allocator
     wal_writer: XLogWriter
+    tx_mgr: TransactionManager
 
+class QueryOperation(Enum):
+    UPDATE = "update"
+    DELETE = "delete"
+
+class UndoLog:
+    def __init__(self, operation: QueryOperation, owner_oid, old_pk, old_tuple_buffer):
+        self.old_pk = old_pk
+        self.owner_oid = owner_oid
+        self.old_tuple_buffer = old_tuple_buffer      
+        self.operation = operation
+    
 class HeapPageUpdateState(QueryExecState):
-    def __init__(self, table_access, heap_page_id, pk, new_tuple):
+    def __init__(self, table_access: TableAccess, heap_page_id, pk, new_tuple):
         super(HeapPageUpdateState, self).__init__(table_access)
         self.pk = pk
         self.new_tuple = new_tuple
@@ -77,6 +106,21 @@ class HeapPageUpdateState(QueryExecState):
     
     def exec(self, ctx: QueryExecutionCtx):
         _heap_page = ctx.allocator.ref_heap_page(self.heap_page_id)
+        old_tuple_buffer = _heap_page.search(self.pk)
+
+        if old_tuple_buffer is None:
+            return self.set_error(code=ExecutionError.NO_HEAP_TUPLE, msg="tuple not found in heap page")
+
+        HeapTuple.write_xmax(old_tuple_buffer, ctx.xid)
+
+        undo = UndoLog(QueryOperation.UPDATE, self.table_access.oid, self.pk, old_tuple_buffer)
+        ctx.tx_mgr.append_undo_log(undo, undo.owner_oid, ctx.old_pk)
+
+        t = StructuredTuple.load(self.table_access.schema, self.new_tuple)
+        t.struct(self.table_access.schema)
+
+        _heap_page.update(ctx=ctx, pk=self.pk, new_tuple=t)
+        return self.set_result(1)
 
 class HeapPageInsertState(QueryExecState):
     def __init__(self, table_access, tuple):

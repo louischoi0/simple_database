@@ -43,6 +43,12 @@ def create_request__query_scan_heap(page_id, table_oid=4001):
     request_id = str(uuid.uuid4())
     return {"request_id": request_id, "command": "scan_heap", "payload": { "page_id": int(page_id), "table_oid": int(table_oid) } }
 
+def create_request__query_update_tuple_heap(page_id, pk, new_tuple, table_oid=4001):
+    request_id = str(uuid.uuid4())
+    new_tuple = {'student_id': 8944, 'name': 'louis', 'grade': 4999} 
+
+    return {"request_id": request_id, "command": "update_heap_tuple", "payload": { "page_id": int(page_id), "owner_oid": int(table_oid), "pk": int(pk), "new_tuple": new_tuple } }
+
 # ── commands ──────────────────────────────────────────────────────────────────
 
 async def scan_heap(args):
@@ -51,6 +57,12 @@ async def scan_heap(args):
         res = await send_request(ws, request)
         for i in res["data"]:
             print(i)
+        
+async def update_heap_tuple(args):
+    async with websockets.connect(SERVER_URI) as ws:
+        request = create_request__query_update_tuple_heap(*args)
+        res = await send_request(ws, request)
+        print(res["data"])
 
 async def get(args):
     async with websockets.connect(SERVER_URI) as ws:
@@ -122,6 +134,7 @@ COMMANDS = {
     "create_index":  (create_index,  ""),
     "insert_tp":     (insert_tp,     "<min_key>"),
     "zero": (scenario_zero, "<count>"),
+    "update": (update_heap_tuple, "<count>"),
 }
 
 def print_usage():

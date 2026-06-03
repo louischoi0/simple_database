@@ -34,10 +34,23 @@ class HeapTuple:
         return cursor.read_int64()
     
     @classmethod
+    def write_xmax(cls, buffer, xmax):
+        cursor = buffer_cursor(buffer)
+        cursor.at(16)
+        cursor.write_int64(xmax)
+        return buffer
+    
+    @classmethod
     def get_minmax_from_buffer(cls, buffer):
         cursor = buffer_cursor(buffer)
         cursor.at(8)
         return cursor.read_int64(), cursor.read_int64()
+
+    @classmethod
+    def get_xmin_from_buffer(cls, buffer):
+        cursor = buffer_cursor(buffer)
+        cursor.at(8)
+        return cursor.read_int64()
 
 class StructuredTuple(HeapTuple):
     def __init__(self, buffer):
@@ -264,7 +277,6 @@ class heap_page(page):
     
     @classmethod
     def is_visible(cls, ctx, tuple_buffer):
-        return True
         xmin, xmax = HeapTuple.get_minmax_from_buffer(tuple_buffer)
         if xmax == 0:
             return xmin <= ctx.xid
@@ -412,8 +424,19 @@ class heap_page(page):
             page = ref_heap_page(self.next_page_id)
         
         return None
-    
+
     def search(self, pk):
+
+        index = self.search_index(pk)
+        if index < 0:
+            return None
+
+        cursor = buffer_cursor(self.buffer)
+        pos = self.slots[index]
+
+        return self.read_tuple_buffer(cursor, pos)
+    
+    def search_index(self, pk):
         from core.page_mgr import ref_heap_page
 
         page = self
@@ -465,7 +488,7 @@ class heap_page(page):
         self.unpin()
         return -1 
 
-    def update(self, pk, new_tuple):
+    def update(self, ctx, pk, new_tuple):
         with self.lock:
             slot_index = self.get_slot_index_by_pk(pk)
             assert slot_index != -1
