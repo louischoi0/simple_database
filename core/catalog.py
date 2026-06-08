@@ -654,7 +654,7 @@ def raw_get_sys_tables(oid):
     
     return StructuredTuple.parse(buffer)
 
-def raw_update_sys_tables_table_desc(oid, desc_pg_id):
+def raw_update_sys_tables_table_desc(ctx, oid, desc_pg_id):
     _info(f"update table desc oid={oid}, desc_pg_id={desc_pg_id}")
     page_heap = ref_heap_page(get_sys_table_desc("tables"))
 
@@ -662,7 +662,7 @@ def raw_update_sys_tables_table_desc(oid, desc_pg_id):
     table_row["desc_page_id"] = desc_pg_id
 
     table_row_new_tuple = StructuredTuple.load(sys_tables_schema, table_row)
-    return page_heap.update(table_row["oid"], table_row_new_tuple, ctx=None)
+    return page_heap.update(ctx, table_row["oid"], table_row_new_tuple)
 
 def raw_build_schema_from_sys_columns(oid):
     schema = get_table_schema_from_cache(oid)

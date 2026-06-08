@@ -433,6 +433,31 @@ def xlog_commit_transaction(wal_writer, xid):
     xlog = XLogCommitTransactionCMD(xid)
     wal_writer.write_xlog(xlog)
     return xlog.lsn
+
+@dataclass
+class XLogHeapTupleUndoWriteCMD(XLog):
+    def __init__(self, xid):
+        super(XLogHeapTupleUndoWriteCMD, self).__init__(xid, "wundolog", XLogHeapTupleUndoWriteCMD(self.xid))
+
+@dataclass
+class XLogHeapTupleUndoWritePayload:
+    def __init__(self, xid, tuple_buffer):
+        self.xid = xid
+        self.tuple_buffer = tuple_buffer
+    
+    def ser(self):
+        cursor = buffer_cursor()
+        cursor.write_int64_a(self.xid)
+        cursor.write_raw_a(self.tuple_buffer)
+        return cursor.buffer
+
+    @classmethod 
+    def decode(cls, buffer):
+        cursor = buffer_cursor(buffer)
+        xid = cursor.read_int64()
+        from core.heap import heap_page as HeapPage
+        tuple_buffer = HeapPage.read_tuple_buffer(cursor.buffer, cursor.c)
+        return XLogHeapTupleUndoWritePayload(xid, tuple_buffer)
     
 @dataclass
 class XLogCommitTransactionCMD(XLog):

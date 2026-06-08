@@ -2,7 +2,8 @@ import threading
 from enum import Enum
 from dataclasses import dataclass, field
 from core.meta import get_metablock
-from core.heap import StructuredTuple
+from core.heap import StructuredTuple, heap_page as HeapPage
+
 from core.const import PAGE_SIZE
 from utils import buffer_cursor
 from utils.logging import info
@@ -21,10 +22,14 @@ _info = lambda *x: info("txmgr", *x)
 
 UNDO_LOGS = {}
 
-class HeapTupleUndoRef:
-    def __init__(self, owner_oid, pk):
+class UndoEntry:
+    def __init__(self, owner_oid, pk, xmin, operation, old_tuple_buffer, prev=None):
         self.owner_oid = owner_oid
         self.pk = pk
+        self.xmin = xmin
+        self.operation = operation
+        self.old_tuple_buffer = old_tuple_buffer
+        self.prev = prev
 
 class TxStatus(Enum):
     IN_PROGRESS = "in_progress"
@@ -68,28 +73,65 @@ class Transaction:
     def execute(self, operation):
         if self.is_error():
             return
+    
+class UndoFreeHeapSpaceMap:
+
+    def __init__(self, alloc):
+        self.free_spaces_map = {}
+        self.free_spaces = []
+        self.alloc = alloc
+
+    def grow(self, page_num):
+        for _ in range(page_num):
+            new_pg = self.alloc.halloc()
+
+            self.free_spaces_map[new_pg.id] = new_pg
+            self.free_spaces.append(new_pg)
+
+    def reserve(self, size):
+        for page in self.free_spaces:
+            if page.possible(size):
+                page.acquire_lock()
+                return page
+        return None
 
 class TransactionManager:
-    def __init__(self):
+    def __init__(self, alloc):
         self.active_txs = []
         self.active_txs_hash = {}
         self.clog_pages = []
 
         self.current_clog_page = None
         self.metablock = get_metablock()
+        self.undo_log_lock = threading.Lock()
+
+        self.undo_fsm = UndoFreeHeapSpaceMap(alloc)
     
     def get_undo_logs(self):
         return UNDO_LOGS
     
-    def append_undo_log(self, undo, owner_oid, pk):
-        if owner_oid not in UNDO_LOGS:
-            UNDO_LOGS[owner_oid] = {}
-        
-        if pk not in UNDO_LOGS[owner_oid]:
-            UNDO_LOGS[owner_oid] = []
+    def append_undo_log(self, new_tuple: StructuredTuple, undo, owner_oid, pk):
+        with self.undo_log_lock:
+            if owner_oid not in UNDO_LOGS:
+                UNDO_LOGS[owner_oid] = {}
+            
+            if pk not in UNDO_LOGS[owner_oid]:
+                UNDO_LOGS[owner_oid] = []
 
-        xmin, xmax = StructuredTuple.get_minmax_from_buffer(undo.old_tuple_buffer)
-        UNDO_LOGS[owner_oid][pk].append( ( (xmin, xmax),  undo))
+            xmin, xmax = StructuredTuple.get_minmax_from_buffer(undo.old_tuple_buffer)
+            UNDO_LOGS[owner_oid][pk].append( ( (xmin, xmax),  undo))
+        
+        size = len(undo.old_tuple_buffer)
+        page: HeapPage = self.undo_fsm.reserve()
+
+        assert page is not None
+
+        index = page.write_buffer(undo.old_tuple_buffer)
+        assert index >= 0
+
+        new_tuple.set_undoptr(page.id, index)
+
+    #def xlog_write_undo_log(self, ):
     
     def write_transaction_status_flag(self, xid, status):
         page_id = xid // PAGE_SIZE

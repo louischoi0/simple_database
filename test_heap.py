@@ -92,6 +92,35 @@ def test_xmin_with_ctx(app):
     for i in read_datas:
         assert i.xmin == TEST_TXID
 
+def test_tuple_update(app):
+    datas = []
+    ctx = QueryExecutionCtx(72, app.alloc, app.wal_writer, app.tx_mgr)
+
+    heap: HeapPage = app.alloc.hpalloc()
+
+    item = data_template.copy()
+    item["student_id"] = 100
+    item["grade"] = 0
+
+    tuple0 = StructuredTuple.load(test_table_schema, item)
+
+    heap.insert(tuple0)
+
+    item["grade"] = 99
+    tuple1 = StructuredTuple.load(test_table_schema, item)
+    app.cache_pool.autocommit()
+
+    code = heap.update(ctx, 100, tuple1)
+    print(code)
+    assert code >= 0
+
+    buffer = heap.raw_get(100)
+
+    t = StructuredTuple.parse(buffer, test_table_schema)
+    data = t.struct(test_table_schema)
+
+    assert data["grade"] == 99
+
 def test_concurrent_insert(app):
     datas = []
     ctx = QueryExecutionCtx(72, app.alloc, app.wal_writer)
@@ -271,8 +300,10 @@ if __name__ == '__main__':
     #test_structured_tuple(app)
     #test_heap_page_grow(app)
     #test_xmin_with_ctx(app)
-    test_split_insert(app)
+    #test_split_insert(app)
     #test_concurrent_insert(app)
+    
+    test_tuple_update(app)
 
     app.cache_pool.autocommit()
     app.meta.commit_metablock()

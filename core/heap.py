@@ -11,14 +11,16 @@ _info = lambda msg: info("heap", msg)
 
 
 class HeapTuple:
-    HEAP_TUPLE_HEADER_SIZE = 32 # size, xmin, xmax, reserved (null bit mask for structured heap tuple)
-    HEAP_TUPLE_RESERVED_SIZE = 8
+    HEAP_TUPLE_HEADER_SIZE = 40 # size, xmin, xmax, null marking, old version (page id, slot index) 
 
     def __init__(self, buffer: bytearray):
         self.buffer: bytearray = buffer
         cursor = buffer_cursor(buffer)
         self.size = cursor.read_int64()
         self.xmin, self.xmax = cursor.read_int64(), cursor.read_int64()
+        self.reserved = cursor.read_int64()
+
+        self.undoptr_page_id, self.undoptr_slot_index = cursor.read_int64(), cursor.read_int64()
     
     def ser(self):
         return self.buffer
@@ -104,6 +106,16 @@ class StructuredTuple(HeapTuple):
         cursor = buffer_cursor(self.buffer)
         cursor.at(16)
         cursor.write_int64(xmax)
+    
+    def set_undoptr(self, page_id, slot_index):
+        self.undoptr_page_id = page_id
+        self.undoptr_slot_index = slot_index
+
+        cursor = buffer_cursor(self.buffer)
+        cursor.at(32)
+
+        cursor.write_int32(page_id)
+        cursor.write_int32(slot_index)
 
     @classmethod
     def parse(self, buffer, schema=None):
@@ -113,7 +125,11 @@ class StructuredTuple(HeapTuple):
         t.size = cursor.read_int64()
         t.xmin = cursor.read_int64()
         t.xmax = cursor.read_int64()
+
         t.reserved = cursor.read_int64()
+        t.undoptr_page_id = cursor.read_int32()
+        t.undoptr_slot_index = cursor.read_int32()
+
         t.pk = cursor.read_int64()
 
         if schema is not None:
@@ -403,7 +419,7 @@ class heap_page(page):
 
                 index = page.get_slot_index_by_pk(pk)
 
-                if index != -1:
+                if index != -ERR_NO_HEAP_TUPLE:
                     cursor = buffer_cursor(page.buffer)
                     pos = page.slots[index]
 
@@ -426,7 +442,6 @@ class heap_page(page):
         return None
 
     def search(self, pk):
-
         index = self.search_index(pk)
         if index < 0:
             return None
@@ -448,7 +463,7 @@ class heap_page(page):
                 page.pin()
                 index = page.get_slot_index_by_pk(pk)
 
-                if index != -1:
+                if index != -ERR_NO_HEAP_TUPLE:
                     page.unpin()
                     return index + acc
 
@@ -467,6 +482,8 @@ class heap_page(page):
     def read_tuple_buffer(cls, cursor, pos):
         cursor.at(pos)
         size = cursor.read_int64() 
+        if size == 0:
+            return None
         cursor.at(pos)
         return cursor.read(size)
     
@@ -479,6 +496,10 @@ class heap_page(page):
                 continue
 
             tuple_buffer = heap_page.read_tuple_buffer(cursor, pos)
+
+            if tuple_buffer is None:
+                continue
+
             _pk = HeapTuple.get_pk_from_buffer(tuple_buffer)
 
             if pk == _pk:
@@ -486,12 +507,14 @@ class heap_page(page):
                 return idx
         
         self.unpin()
-        return -1 
+        return -ERR_NO_HEAP_TUPLE
 
     def update(self, ctx, pk, new_tuple):
         with self.lock:
             slot_index = self.get_slot_index_by_pk(pk)
-            assert slot_index != -1
+
+            if slot_index < 0:
+                return -ERR_NO_HEAP_TUPLE
 
             self.delete_tuple_by_index(slot_index)
             return self.insert(new_tuple, locking=False)
@@ -579,6 +602,22 @@ class heap_page(page):
         ctx.allocator.return_temp_heap_page(temp_heap_page)
 
         return new_heap_page
+    
+    def write_buffer(self, buffer, locking=True):
+        locking and self.lock.acquire()
+
+        self.tuple_count += 1
+        slot_index = len(self.slots)
+        size = len(buffer)
+
+        self.write_tuple_count()
+        self.add_slot(size)
+        self.write_tuple_data(size, buffer)
+        self.update_header_buffer()
+
+        locking and self.lock.release()
+
+        return slot_index
         
     def insert(self, t, ctx=None, locking=True):
         locking and self.lock.acquire()

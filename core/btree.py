@@ -9,7 +9,7 @@ from core.wal import xlog_full_page_write
 from utils.buffer_cursor import buffer_cursor
 from utils.logging import info
 
-_info = lambda x: info("btree", x)
+_info = lambda *x: info("btree", *x)
 
 class bt_cursor:
     def __init__(self):
@@ -272,9 +272,10 @@ class bt_node:
             node_type_before_split = _ptype(target)
             split_node, insert_index = target.insert_phase_one(split_node)
 
+            if insert_index == 0:
+                target.update_min_key_upper_nodes(insert_min_key, cursor.copy())
+
             if split_node is None:
-                if insert_index == 0:
-                    target.update_min_key_upper_nodes(insert_min_key, cursor)
                 return target
 
             ntarget = cursor.pop_try()
@@ -310,9 +311,10 @@ class bt_node:
         split_node, cursor, insert_index = self.insert_phase_zero(inode, ctx=ctx)
         insert_min_key = _minkey(inode)
 
+        if insert_index == 0:
+            self.update_min_key_upper_nodes(insert_min_key, cursor.copy())
+
         if split_node is None:
-            if insert_index == 0:
-                self.update_min_key_upper_nodes(insert_min_key, cursor)
             return self
 
         new_root_btn = bt_node.merge_split_node(insert_min_key, cursor, split_node)
@@ -387,21 +389,24 @@ class bt_node:
 
         index = self.find_leaf_index_to_insert_page(_minkey(inode))
 
+
         if _minkey(inode) < self.page.min_key:
-            assert index == 0
+            _info(_minkey(inode), self.page.min_key, index)
+        #    assert index == 0
 
         if ctx is not None:
             xlog = bt_node.create_xlog_btree_slot_insert(ctx.xid, _id(self), _id(inode), index)
             ctx.wal_writer.write_xlog(xlog)
 
-        _info(f"direct insert #{_id(inode)} to #{_id(self)} before: slots={self.slots}, min_key={_minkey(self)}, {_minkey(inode)}")
+        _info(f"direct insert #{_id(inode)} to #{_id(self)} before: keys={self.keys} slots={self.slots}, min_key={_minkey(self)}, {_minkey(inode)}")
         if index > 0:
             self.slots.insert(index, _id(inode))
-            self.keys.insert(index-1, _minkey(inode))
         else:
-            first_slot = self.slots[0]
-            self.keys.insert(0, ref_minkey(first_slot))
             self.slots.insert(0, _id(inode))
+        
+        self.keys = []
+        for page_id in self.slots[1:]:
+            self.keys.append(ref_minkey(page_id))
 
         self.set_min_key(ref_minkey(self.slots[0]))
 
@@ -441,7 +446,6 @@ class bt_node:
 
     def find_leaf_index_to_insert_page(self, tuple_key):
         idx = 0
-
         _info(f"direct insert: {tuple_key} to {_id(self)},")
 
         for node_id in self.slots:

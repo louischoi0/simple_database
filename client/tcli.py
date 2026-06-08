@@ -74,8 +74,8 @@ async def select(args):
     async with websockets.connect(SERVER_URI) as ws:
         request = create_request__query_select(4001)
         res = await send_request(ws, request)
-        for i in res["data"]:
-            print(i)
+        for idx, i in enumerate(res["data"]):
+            print(idx, i)
 
 async def i_select(args):
     index_entry_pg_id = int(args[0])
